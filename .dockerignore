@@ -1,0 +1,6 @@
+scraper.db
+bin/
+.env
+.git/
+.github/
+*.md

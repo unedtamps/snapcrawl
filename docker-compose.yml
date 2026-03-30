@@ -1,0 +1,16 @@
+services:
+  snapcrawl:
+    build: .
+    image: unedotamps/snapcrawl
+    container_name: snapcrawl
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - snapcrawl-data:/app/data
+    environment:
+      - PORT=8080
+      - DATA_DIR=/app/data
+
+volumes:
+  snapcrawl-data:

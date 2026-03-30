@@ -53,7 +53,12 @@ func main() {
 
 	// Initialize Database
 	var err error
-	database, err = db.New("scraper.db")
+	dbPath := "scraper.db"
+	if dataDir := os.Getenv("DATA_DIR"); dataDir != "" {
+		os.MkdirAll(dataDir, 0755)
+		dbPath = dataDir + "/scraper.db"
+	}
+	database, err = db.New(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
