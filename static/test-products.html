@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TechStore - AI Scraping Test Page</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            color: white;
+            padding: 40px 0;
+        }
+        header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin: 30px 0;
+            color: white;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.8;
+        }
+        .products-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 25px;
+            margin-top: 40px;
+        }
+        .product-card {
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .product-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        }
+        .product-image {
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 4em;
+        }
+        .product-info {
+            padding: 20px;
+        }
+        .product-category {
+            display: inline-block;
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .product-name {
+            font-size: 1.3em;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 8px;
+            line-height: 1.3;
+        }
+        .product-description {
+            color: #666;
+            font-size: 0.9em;
+            line-height: 1.5;
+            margin-bottom: 15px;
+        }
+        .product-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .product-price {
+            font-size: 1.5em;
+            font-weight: 700;
+            color: #2e7d32;
+        }
+        .product-price .original {
+            font-size: 0.7em;
+            color: #999;
+            text-decoration: line-through;
+            margin-left: 8px;
+        }
+        .stock-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .in-stock {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .low-stock {
+            background: #fff3e0;
+            color: #ef6c00;
+        }
+        .out-of-stock {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .product-rating {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-top: 10px;
+            color: #ffa726;
+        }
+        .review-count {
+            color: #999;
+            font-size: 0.85em;
+        }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 50px;
+            padding: 20px;
+        }
+        .pagination button {
+            padding: 12px 24px;
+            border: none;
+            background: white;
+            color: #667eea;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .pagination button:hover:not(:disabled) {
+            background: #667eea;
+            color: white;
+            transform: scale(1.05);
+        }
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        footer {
+            text-align: center;
+            color: white;
+            padding: 40px 0;
+            margin-top: 40px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TechStore</h1>
+            <p>Premium Electronics & Gadgets</p>
+            
+            <div class="stats">
+                <div class="stat-item">
+                    <div class="stat-value">2,547</div>
+                    <div class="stat-label">Products</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">15K+</div>
+                    <div class="stat-label">Happy Customers</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">4.9</div>
+                    <div class="stat-label">Average Rating</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="products-grid">
+            <!-- Product 1 -->
+            <div class="product-card" data-product-id="PROD-001">
+                <div class="product-image">💻</div>
+                <div class="product-info">
+                    <span class="product-category">Laptops</span>
+                    <h3 class="product-name">ProBook Ultra X1</h3>
+                    <p class="product-description">15.6" 4K OLED display, Intel Core i9, 32GB RAM, 1TB SSD. Perfect for professionals.</p>
+                    <div class="product-rating">
+                        <span>★★★★★</span>
+                        <span class="review-count">(128 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $1,299.99
+                            <span class="original">$1,599.99</span>
+                        </div>
+                        <span class="stock-status in-stock">In Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 2 -->
+            <div class="product-card" data-product-id="PROD-002">
+                <div class="product-image">📱</div>
+                <div class="product-info">
+                    <span class="product-category">Smartphones</span>
+                    <h3 class="product-name">Galaxy Pro Max 5G</h3>
+                    <p class="product-description">6.8" AMOLED 120Hz, Snapdragon 8 Gen 3, 256GB storage, 5000mAh battery.</p>
+                    <div class="product-rating">
+                        <span>★★★★★</span>
+                        <span class="review-count">(342 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $899.00
+                        </div>
+                        <span class="stock-status in-stock">In Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 3 -->
+            <div class="product-card" data-product-id="PROD-003">
+                <div class="product-image">🎧</div>
+                <div class="product-info">
+                    <span class="product-category">Audio</span>
+                    <h3 class="product-name">SonicPro Wireless ANC</h3>
+                    <p class="product-description">Premium noise-canceling headphones with 40h battery life and spatial audio.</p>
+                    <div class="product-rating">
+                        <span>★★★★☆</span>
+                        <span class="review-count">(89 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $349.95
+                            <span class="original">$449.95</span>
+                        </div>
+                        <span class="stock-status low-stock">Low Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 4 -->
+            <div class="product-card" data-product-id="PROD-004">
+                <div class="product-image">⌚</div>
+                <div class="product-info">
+                    <span class="product-category">Wearables</span>
+                    <h3 class="product-name">FitTrack Pro Smartwatch</h3>
+                    <p class="product-description">Health monitoring, GPS, 7-day battery, water-resistant to 50m.</p>
+                    <div class="product-rating">
+                        <span>★★★★★</span>
+                        <span class="review-count">(567 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $249.99
+                        </div>
+                        <span class="stock-status in-stock">In Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 5 -->
+            <div class="product-card" data-product-id="PROD-005">
+                <div class="product-image">📷</div>
+                <div class="product-info">
+                    <span class="product-category">Cameras</span>
+                    <h3 class="product-name">LensMaster 4K Mirrorless</h3>
+                    <p class="product-description">24.2MP full-frame sensor, 4K 60fps video, 5-axis stabilization.</p>
+                    <div class="product-rating">
+                        <span>★★★★★</span>
+                        <span class="review-count">(45 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $1,799.00
+                        </div>
+                        <span class="stock-status out-of-stock">Out of Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 6 -->
+            <div class="product-card" data-product-id="PROD-006">
+                <div class="product-image">🎮</div>
+                <div class="product-info">
+                    <span class="product-category">Gaming</span>
+                    <h3 class="product-name">GameStation 5 Console</h3>
+                    <p class="product-description">Next-gen gaming with ray tracing, 4K 120fps, ultra-fast SSD.</p>
+                    <div class="product-rating">
+                        <span>★★★★★</span>
+                        <span class="review-count">(1,203 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $499.99
+                        </div>
+                        <span class="stock-status in-stock">In Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 7 -->
+            <div class="product-card" data-product-id="PROD-007">
+                <div class="product-image">🔊</div>
+                <div class="product-info">
+                    <span class="product-category">Audio</span>
+                    <h3 class="product-name">BassBoom 360 Speaker</h3>
+                    <p class="product-description">Portable waterproof speaker with 360° sound and 24h playtime.</p>
+                    <div class="product-rating">
+                        <span>★★★★☆</span>
+                        <span class="review-count">(234 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $129.95
+                            <span class="original">$179.95</span>
+                        </div>
+                        <span class="stock-status in-stock">In Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 8 -->
+            <div class="product-card" data-product-id="PROD-008">
+                <div class="product-image">💾</div>
+                <div class="product-info">
+                    <span class="product-category">Storage</span>
+                    <h3 class="product-name">SpeedDrive Pro 2TB</h3>
+                    <p class="product-description">External NVMe SSD with 2000MB/s transfer speeds, USB-C connectivity.</p>
+                    <div class="product-rating">
+                        <span>★★★★★</span>
+                        <span class="review-count">(178 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $189.99
+                        </div>
+                        <span class="stock-status in-stock">In Stock</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Product 9 -->
+            <div class="product-card" data-product-id="PROD-009">
+                <div class="product-image">🖥️</div>
+                <div class="product-info">
+                    <span class="product-category">Monitors</span>
+                    <h3 class="product-name">UltraView 32" 4K Monitor</h3>
+                    <p class="product-description">Professional-grade color accuracy, HDR600, USB-C hub, 99% sRGB.</p>
+                    <div class="product-rating">
+                        <span>★★★★★</span>
+                        <span class="review-count">(92 reviews)</span>
+                    </div>
+                    <div class="product-meta">
+                        <div class="product-price">
+                            $649.00
+                        </div>
+                        <span class="stock-status low-stock">Low Stock</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="pagination">
+            <button disabled>← Previous</button>
+            <button>Page 1 of 15</button>
+            <button class="next-page">Next →</button>
+        </div>
+
+        <footer>
+            <p>© 2024 TechStore. Built for AI Scraping Testing.</p>
+            <p>This page is designed to test web scraping capabilities with various data types.</p>
+        </footer>
+    </div>
+
+    <script>
+        // Simple pagination simulation
+        document.querySelector('.next-page').addEventListener('click', function() {
+            alert('In a real scenario, this would load page 2. For testing, this page contains all the sample data needed.');
+        });
+    </script>
+</body>
+</html>

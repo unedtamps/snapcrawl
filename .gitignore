@@ -1,0 +1,4 @@
+bin
+webscraper
+scraper.db
+.env

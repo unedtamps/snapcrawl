@@ -1,0 +1,789 @@
+// SnapCrawl AI — Alpine.js Application
+
+function appData() {
+    return {
+        // ── State ──
+        projects: [],
+        currentProjectID: null,
+        currentProject: null,
+        newProjectName: '',
+        activeTab: 'config',
+        showParams: false,
+
+        config: {
+            baseUrl: '',
+            schema: '',
+            prompt: '',
+            provider: 'deepseek',
+            delay: 1000,
+        },
+
+        urlParams: [{ key: '', value: '', enabled: true, mode: 'static' }],
+
+        aiPrompt: '',
+        generatingSchema: false,
+
+        apiConfig: {
+            enabled: false,
+            params: [{ name: '', type: 'string', required: false, default_value: '', description: '' }],
+        },
+
+        // ── Settings & LLM Providers ──
+        showSettingsModal: false,
+        llmProviders: [],
+        newProvider: { name: '', base_url: '', model_name: '', api_key: '' },
+
+        modal: { show: false, content: '' },
+        toasts: [],
+        toastCounter: 0,
+
+        latestResult: null,
+        testController: null,
+
+        // ── Batch Iteration State ──
+        batchConfig: {},
+        batchState: { running: false, progress: 0, total: 0, results: [], combinations: [] },
+        batchController: null,
+
+        // ── Lifecycle ──
+        async init() {
+            await this.loadLLMProviders();
+            await this.loadProjects();
+
+            // Close modal on Escape
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') this.closeModal();
+            });
+        },
+
+        // ── LLM Providers ──
+        async loadLLMProviders() {
+            try {
+                const res = await fetch('/api/providers');
+                if (res.ok) {
+                    this.llmProviders = (await res.json()) || [];
+                    // Ensure a default is selected if config is empty or invalid
+                    if (this.llmProviders.length > 0 && !this.llmProviders.find(p => p.id.toString() === this.config.provider)) {
+                        this.config.provider = this.llmProviders[0].id.toString();
+                    } else if (this.llmProviders.length === 0) {
+                        this.config.provider = '';
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load providers:', e);
+            }
+        },
+
+        async createLLMProvider() {
+            try {
+                const res = await fetch('/api/providers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.newProvider),
+                });
+                if (res.ok) {
+                    this.showToast('Provider added', 'success');
+                    this.newProvider = { name: '', base_url: '', model_name: '', api_key: '' };
+                    await this.loadLLMProviders();
+                } else {
+                    const err = await res.json();
+                    this.showToast(err.error || 'Failed to add provider', 'error');
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            }
+        },
+
+        async deleteLLMProvider(id) {
+            if (!confirm('Delete this provider?')) return;
+            try {
+                const res = await fetch('/api/providers/' + id, { method: 'DELETE' });
+                if (res.ok) {
+                    this.showToast('Provider deleted', 'success');
+                    await this.loadLLMProviders();
+                } else {
+                    const err = await res.json();
+                    this.showToast(err.error || 'Failed to delete provider', 'error');
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            }
+        },
+
+        // ── Projects ──
+        async loadProjects() {
+            try {
+                const res = await fetch('/projects');
+                if (res.ok) this.projects = await res.json();
+            } catch (e) {
+                console.error('Failed to load projects:', e);
+            }
+        },
+
+        async createProject() {
+            const name = this.newProjectName.trim();
+            if (!name) return;
+
+            try {
+                const res = await fetch('/projects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+
+                if (res.ok) {
+                    const project = await res.json();
+                    this.newProjectName = '';
+                    this.showToast(`Project "${name}" created`, 'success');
+                    await this.loadProjects();
+                    this.selectProject(project.id);
+                } else {
+                    const err = await res.json();
+                    this.showToast(err.error || 'Failed to create project', 'error');
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            }
+        },
+
+        async selectProject(id) {
+            this.currentProjectID = id;
+            try {
+                const res = await fetch(`/projects/${id}`);
+                if (res.ok) {
+                    this.currentProject = await res.json();
+                    this.activeTab = 'config';
+                    this.loadProjectData();
+                }
+            } catch (e) {
+                console.error('Failed to load project:', e);
+            }
+        },
+
+        loadProjectData() {
+            if (!this.currentProject) return;
+
+            this.config.baseUrl = this.currentProject.base_url || '';
+            this.config.schema = this.currentProject.schema || '';
+            this.config.prompt = this.currentProject.prompt || '';
+            this.config.provider = this.currentProject.provider || 'deepseek';
+            this.config.delay = this.currentProject.delay_ms || 1000;
+
+            this.parseUrlToParams();
+            this.loadAPIConfig();
+            this.loadLatestData();
+        },
+
+        async deleteProject() {
+            if (!this.currentProjectID) return;
+            if (!confirm('Delete this project and all its data?')) return;
+
+            try {
+                const res = await fetch(`/projects/${this.currentProjectID}`, { method: 'DELETE' });
+                if (res.ok) {
+                    this.showToast('Project deleted', 'success');
+                    this.currentProjectID = null;
+                    this.currentProject = null;
+                    this.loadProjects();
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            }
+        },
+
+        // ── URL Parameters ──
+        parseUrlToParams() {
+            const urlString = this.config.baseUrl.trim();
+            if (!urlString) {
+                this.urlParams = [{ key: '', value: '', enabled: true, mode: 'static' }];
+                return;
+            }
+
+            try {
+                const validUrl = urlString.startsWith('http') ? urlString : `https://${urlString}`;
+                const urlObj = new URL(validUrl);
+
+                const newParams = [];
+                urlObj.searchParams.forEach((value, key) => {
+                    const existing = this.urlParams.find(p => p.key === key);
+                    let mode = existing ? existing.mode : 'static';
+
+                    // If it exists in the API params, mark it dynamic
+                    if (this.apiConfig.params.some(ap => ap.name === key)) {
+                        mode = 'dynamic';
+                    }
+                    newParams.push({ key, value, enabled: true, mode });
+                });
+
+                newParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+                this.urlParams = newParams;
+            } catch (e) {
+                // Invalid URL – do nothing
+            }
+        },
+
+        updateUrlParam(index, field, value) {
+            this.urlParams[index][field] = value;
+
+            // Auto-add row if typing in the last row
+            if (index === this.urlParams.length - 1 && (this.urlParams[index].key || this.urlParams[index].value)) {
+                this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+            }
+
+            this.buildUrlFromParams();
+        },
+
+        addUrlParam() {
+            this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+        },
+
+        removeUrlParam(index) {
+            this.urlParams.splice(index, 1);
+            if (this.urlParams.length === 0) {
+                this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+            }
+            this.buildUrlFromParams();
+        },
+
+        buildUrlFromParams() {
+            const urlString = this.config.baseUrl.trim();
+            if (!urlString) return;
+
+            try {
+                const validUrl = urlString.startsWith('http') ? urlString : `https://${urlString}`;
+                const urlObj = new URL(validUrl);
+                urlObj.search = '';
+
+                this.urlParams.forEach(p => {
+                    if (p.enabled && p.key) {
+                        urlObj.searchParams.append(p.key, p.value);
+                    }
+                });
+
+                this.config.baseUrl = urlObj.toString();
+            } catch (e) {}
+        },
+
+        // ── Config Save ──
+        async saveConfig() {
+            if (!this.currentProjectID) return;
+
+            const schema = this.config.schema.trim();
+            if (!this.config.baseUrl.trim() || !schema) {
+                this.showToast('Base URL and Schema are required', 'error');
+                return;
+            }
+
+            try {
+                JSON.parse(schema);
+            } catch (e) {
+                this.showToast('Invalid JSON schema: ' + e.message, 'error');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/projects/${this.currentProjectID}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: this.currentProject.name,
+                        base_url: this.config.baseUrl.trim(),
+                        schema: schema,
+                        prompt: this.config.prompt.trim(),
+                        provider: this.config.provider,
+                        delay_ms: this.config.delay,
+                    }),
+                });
+
+                if (res.ok) {
+                    this.showToast('Configuration saved!', 'success');
+
+                    // Auto-sync dynamic params: merge into existing API params without overwriting user changes
+                    const dynamicParams = this.urlParams
+                        .filter(p => p.key.trim() && p.enabled && p.mode === 'dynamic');
+
+                    if (dynamicParams.length > 0) {
+                        // Build a map of existing API params by name to preserve user edits (type, required, description)
+                        const existingByName = {};
+                        for (const ep of this.apiConfig.params) {
+                            if (ep.name) existingByName[ep.name] = ep;
+                        }
+
+                        const mergedParams = dynamicParams.map(p => {
+                            const existing = existingByName[p.key];
+                            if (existing) {
+                                // Preserve user-edited fields, only update default_value from URL
+                                return {
+                                    ...existing,
+                                    default_value: p.value,
+                                };
+                            }
+                            // New param: auto-detect type from value
+                            const detectedType = (p.value !== '' && !isNaN(Number(p.value))) ? 'number' : 'string';
+                            return {
+                                name: p.key,
+                                type: detectedType,
+                                required: false,
+                                default_value: p.value,
+                                description: '',
+                            };
+                        });
+
+                        await fetch(`/projects/${this.currentProjectID}/api-config`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                enabled: this.apiConfig.enabled,
+                                params: mergedParams,
+                            }),
+                        });
+                        this.showToast(`${mergedParams.length} dynamic param(s) synced to Interface`, 'info');
+                    }
+
+                    this.loadAPIConfig();
+                } else {
+                    const err = await res.json();
+                    this.showToast('Error: ' + (err.error || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            }
+        },
+
+        // ── Test Scrape ──
+        async testScrape() {
+            if (!this.currentProjectID || !this.currentProject) return;
+
+            const baseUrl = this.config.baseUrl.trim();
+            if (!baseUrl) {
+                this.showToast('Please enter a Base URL', 'error');
+                return;
+            }
+
+            if (this.testController) this.testController.abort();
+            this.testController = new AbortController();
+            const signal = this.testController.signal;
+
+            this.showModal(`
+                <div style="text-align:center; padding:24px;">
+                    <div style="color:var(--text-muted); margin-bottom: 16px;">Testing... please wait</div>
+                    <button class="btn-secondary" onclick="document.querySelector('[x-data]').__x.$data.cancelTest()">Cancel</button>
+                </div>
+            `);
+
+            try {
+                const schema = JSON.parse(this.config.schema);
+                const res = await fetch('/api/v2/ai/scrape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: baseUrl,
+                        schema: schema,
+                        prompt: this.config.prompt.trim(),
+                        provider: this.config.provider,
+                    }),
+                    signal,
+                });
+
+                const result = await res.json();
+
+                if (res.ok) {
+                    this.showModal(`
+                        <div class="result-preview">
+                            <p><strong>URL:</strong> ${this.escapeHtml(result.url)}</p>
+                            <p><strong>Tokens:</strong> ${result.tokens_used}</p>
+                            <p><strong>Duration:</strong> ${result.duration_ms}ms</p>
+                            <h4>Extracted Data:</h4>
+                            <pre>${this.escapeHtml(JSON.stringify(result.data, null, 2))}</pre>
+                        </div>
+                    `);
+                } else {
+                    this.showModal(`<div class="error">Error: ${this.escapeHtml(result.error || 'Unknown error')}</div>`);
+                }
+            } catch (e) {
+                if (e.name === 'AbortError') {
+                    this.showModal('<div style="text-align:center; padding:24px; color:var(--text-muted);">Test canceled.</div>');
+                } else {
+                    this.showModal(`<div class="error">Error: ${this.escapeHtml(e.message)}</div>`);
+                }
+            } finally {
+                this.testController = null;
+            }
+        },
+
+        cancelTest() {
+            if (this.testController) this.testController.abort();
+        },
+
+        // ── Results ──
+        async loadLatestData() {
+            if (!this.currentProjectID) return;
+            try {
+                const res = await fetch(`/projects/${this.currentProjectID}/data`);
+                if (res.ok) {
+                    const data = await res.json();
+                    this.latestResult = data && data.length > 0 ? data[0] : null;
+                }
+            } catch (e) {
+                console.error('Failed to load data:', e);
+            }
+        },
+
+        formatJSON(data) {
+            try {
+                const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+                return JSON.stringify(parsed, null, 2);
+            } catch (e) {
+                return String(data);
+            }
+        },
+
+        exportJSON() {
+            if (this.currentProjectID) window.location.href = `/projects/${this.currentProjectID}/data`;
+        },
+
+        exportCSV() {
+            if (this.currentProjectID) window.location.href = `/projects/${this.currentProjectID}/data.csv`;
+        },
+
+        // ── AI Schema Generation ──
+        async generateSchema() {
+            const baseUrl = this.config.baseUrl.trim();
+            if (!baseUrl) { this.showToast('Please enter a Base URL first', 'error'); return; }
+            if (!this.aiPrompt.trim()) { this.showToast('Please describe what data you want to extract', 'error'); return; }
+
+            this.generatingSchema = true;
+
+            try {
+                const res = await fetch('/api/generate-schema', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: baseUrl, prompt: this.aiPrompt.trim(), provider: this.config.provider }),
+                });
+
+                const result = await res.json();
+
+                if (res.ok && result.schema) {
+                    this.config.schema = JSON.stringify(result.schema, null, 2);
+                    this.showToast(`Schema generated! (${result.tokens_used} tokens)`, 'success');
+                } else {
+                    this.showToast('Error: ' + (result.error || 'Failed to generate schema'), 'error');
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            } finally {
+                this.generatingSchema = false;
+            }
+        },
+
+        // ── API Interface ──
+        async loadAPIConfig() {
+            if (!this.currentProjectID) return;
+
+            try {
+                const res = await fetch(`/projects/${this.currentProjectID}/api-config`);
+                if (res.ok) {
+                    const config = await res.json();
+                    this.apiConfig.enabled = config.enabled;
+                    this.apiConfig.params = config.params || [];
+                    if (this.apiConfig.params.length === 0) {
+                        this.apiConfig.params.push({ name: '', type: 'string', required: false, default_value: '', description: '' });
+                    }
+                    this.updateCurlPreview();
+
+                    // Re-parse URL params to restore dynamic states
+                    this.parseUrlToParams();
+                    
+                    // Update batch iterations based on allowed params
+                    this.updateBatchCombinations();
+                }
+            } catch (e) {
+                console.error('Failed to load API config:', e);
+            }
+        },
+
+        async saveAPIConfig() {
+            if (!this.currentProjectID) return;
+
+            const validParams = this.apiConfig.params.filter(p => p.name.trim() !== '');
+            const config = {
+                enabled: this.apiConfig.enabled,
+                params: validParams,
+            };
+
+            try {
+                const res = await fetch(`/projects/${this.currentProjectID}/api-config`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config),
+                });
+
+                if (res.ok) {
+                    this.showToast('API configuration saved!', 'success');
+                } else {
+                    const err = await res.json();
+                    this.showToast('Error: ' + (err.error || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            }
+        },
+
+        updateApiParam(index, field, value) {
+            this.apiConfig.params[index][field] = value;
+
+            // Auto-add new row only when typing in name on last row
+            if (index === this.apiConfig.params.length - 1 && field === 'name' && value.trim() !== '') {
+                this.apiConfig.params.push({ name: '', type: 'string', required: false, default_value: '', description: '' });
+            }
+
+            this.updateCurlPreview();
+        },
+
+        addApiParam() {
+            this.apiConfig.params.push({ name: '', type: 'string', required: false, default_value: '', description: '' });
+        },
+
+        removeApiParam(index) {
+            this.apiConfig.params.splice(index, 1);
+            if (this.apiConfig.params.length === 0) {
+                this.apiConfig.params.push({ name: '', type: 'string', required: false, default_value: '', description: '' });
+            }
+            this.updateCurlPreview();
+            this.updateBatchCombinations();
+        },
+
+        // ── Batch Iteration Logic ──
+        syncBatchConfig() {
+            this.apiConfig.params.forEach(p => {
+                if (!p.name) return;
+                if (!this.batchConfig[p.name]) {
+                    this.batchConfig[p.name] = p.type === 'number' 
+                        ? { start: 1, end: 1, step: 1 } 
+                        : { list: '' };
+                }
+            });
+        },
+
+        updateBatchCombinations() {
+            this.syncBatchConfig();
+            const params = this.apiConfig.params.filter(p => !!p.name);
+            
+            const variations = {};
+            for (const p of params) {
+                variations[p.name] = [];
+                const config = this.batchConfig[p.name];
+                if (!config) continue;
+                
+                if (p.type === 'number') {
+                    const start = parseFloat(config.start);
+                    const end = parseFloat(config.end);
+                    const step = parseFloat(config.step);
+                    if (!isNaN(start) && !isNaN(end) && !isNaN(step) && step > 0) {
+                        for (let v = start; v <= end; v += step) {
+                            variations[p.name].push(v);
+                        }
+                    }
+                } else {
+                    if (config.list && config.list.trim()) {
+                        const parts = config.list.split(',').map(s => s.trim()).filter(s => s);
+                        variations[p.name] = parts;
+                    }
+                }
+                
+                if (variations[p.name].length === 0) {
+                    this.batchState.combinations = [];
+                    this.batchState.total = 0;
+                    return;
+                }
+            }
+            
+            const paramNames = Object.keys(variations);
+            if (paramNames.length === 0) {
+                this.batchState.combinations = [];
+                this.batchState.total = 0;
+                return;
+            }
+            
+            const combos = [];
+            const helper = (paramIdx, currentCombo) => {
+                if (paramIdx === paramNames.length) {
+                    combos.push({...currentCombo});
+                    return;
+                }
+                const name = paramNames[paramIdx];
+                for (const val of variations[name]) {
+                    currentCombo[name] = val;
+                    helper(paramIdx + 1, currentCombo);
+                }
+            };
+            
+            helper(0, {});
+            this.batchState.combinations = combos;
+            this.batchState.total = combos.length;
+        },
+
+        async runBatchScrape() {
+            this.updateBatchCombinations();
+            if (this.batchState.combinations.length === 0) return;
+            
+            this.batchState.running = true;
+            this.batchState.progress = 0;
+            this.batchState.results = [];
+            
+            if (this.batchController) this.batchController.abort();
+            this.batchController = new AbortController();
+            const signal = this.batchController.signal;
+            
+            const baseUrl = `${window.location.origin}/api/public/${this.currentProjectID}/scrape`;
+            
+            try {
+                for (const combo of this.batchState.combinations) {
+                    if (signal.aborted) break;
+                    
+                    const urlObj = new URL(baseUrl);
+                    for (const [k, v] of Object.entries(combo)) {
+                        urlObj.searchParams.append(k, v);
+                    }
+                    
+                    const res = await fetch(urlObj.toString(), { signal });
+                    const result = await res.json();
+                    
+                    if (res.ok && result.data) {
+                        const dataItems = Array.isArray(result.data) ? result.data : [result.data];
+                        for (const item of dataItems) {
+                            this.batchState.results.push({
+                                _url: result.url,
+                                _params: combo,
+                                ...item
+                            });
+                        }
+                    } else if (!res.ok) {
+                        this.showToast('Batch item error: ' + (result.error || 'Unknown error'), 'error');
+                    }
+                    
+                    this.batchState.progress++;
+                }
+                if (!signal.aborted) {
+                    this.showToast('Batch scraping completed successfully.', 'success');
+                }
+            } catch (e) {
+                if (e.name !== 'AbortError') {
+                    this.showToast('Batch error: ' + e.message, 'error');
+                } else {
+                    this.showToast('Batch scraping canceled.', 'info');
+                }
+            } finally {
+                this.batchState.running = false;
+                this.batchController = null;
+            }
+        },
+
+        cancelBatchScrape() {
+            if (this.batchController) this.batchController.abort();
+        },
+
+        downloadBatchJSON() {
+            if (this.batchState.results.length === 0) return;
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.batchState.results, null, 2));
+            const a = document.createElement('a');
+            a.href = dataStr;
+            a.download = `batch_results_${this.currentProjectID}.json`;
+            a.click();
+        },
+
+        downloadBatchCSV() {
+            if (this.batchState.results.length === 0) return;
+            const rows = this.batchState.results;
+            
+            const headersSet = new Set(['_url']);
+            rows.forEach(r => Object.keys(r._params || {}).forEach(k => headersSet.add('param_' + k)));
+            rows.forEach(r => Object.keys(r).forEach(k => {
+                if (k !== '_url' && k !== '_params') headersSet.add(k);
+            }));
+            const headers = Array.from(headersSet);
+            
+            const csvRows = [headers.join(',')];
+            
+            rows.forEach(row => {
+                const values = headers.map(h => {
+                    let val = '';
+                    if (h === '_url') val = row._url;
+                    else if (h.startsWith('param_')) {
+                        const paramName = h.replace('param_', '');
+                        val = row._params ? row._params[paramName] : '';
+                    } else {
+                        val = row[h];
+                    }
+                    const strVal = String(val === null || val === undefined ? '' : val).replace(/"/g, '""');
+                    return `"${strVal}"`;
+                });
+                csvRows.push(values.join(','));
+            });
+            
+            const dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(csvRows.join('\n'));
+            const a = document.createElement('a');
+            a.href = dataStr;
+            a.download = `batch_results_${this.currentProjectID}.csv`;
+            a.click();
+        },
+
+        // ── Computed-like ──
+        get endpointUrl() {
+            if (!this.currentProjectID) return '—';
+            return `${window.location.origin}/api/public/${this.currentProjectID}/scrape`;
+        },
+
+        get curlPreview() {
+            if (!this.currentProjectID) return 'curl "..."';
+
+            let url = `${window.location.origin}/api/public/${this.currentProjectID}/scrape`;
+            const validParams = this.apiConfig.params.filter(p => p.name.trim() !== '');
+
+            if (validParams.length > 0) {
+                const parts = validParams.map(p => {
+                    const val = p.default_value || (p.type === 'number' ? '0' : '{value}');
+                    return `${encodeURIComponent(p.name)}=${encodeURIComponent(val)}`;
+                });
+                url += '?' + parts.join('&');
+            }
+
+            return `curl "${url}"`;
+        },
+
+        // A no-op trigger method to force Alpine reactivity for the getter
+        updateCurlPreview() {
+            // Getters are automatically reactive in Alpine, but we keep
+            // this method name for backward-compat with event handlers.
+        },
+
+        copyEndpointURL() {
+            const url = this.endpointUrl;
+            if (url === '—') return;
+            navigator.clipboard.writeText(url).then(() => {
+                this.showToast('Endpoint URL copied!', 'success');
+            });
+        },
+
+        // ── Modal ──
+        showModal(content) {
+            this.modal = { show: true, content };
+        },
+
+        closeModal() {
+            this.modal.show = false;
+        },
+
+        // ── Toast ──
+        showToast(message, type = 'info') {
+            this.toasts.push({ id: ++this.toastCounter, message, type });
+        },
+
+        // ── Utility ──
+        escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        },
+    };
+}
