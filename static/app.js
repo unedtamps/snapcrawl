@@ -20,10 +20,13 @@ function appData() {
 
         urlParams: [{ key: '', value: '', enabled: true, mode: 'static' }],
 
-        aiPrompt: '',
-        generatingSchema: false,
-
-        pagePreview: { markdown: '', loading: false, error: '', size: '' },
+        extractionPrompt: '',
+        extractionConfig: '',
+        generatingExtractionConfig: false,
+        testingExtraction: false,
+        extractionTestResult: '',
+        extractionTestError: '',
+        extractionTestPreview: '',
 
         apiConfig: {
             enabled: false,
@@ -171,7 +174,13 @@ function appData() {
             this.config.provider = this.currentProject.provider || 'deepseek';
             this.config.delay = this.currentProject.delay_ms || 1000;
 
-            this.pagePreview = { markdown: '', loading: false, error: '', size: '' };
+            this.extractionPrompt = this.currentProject.prompt || '';
+            this.extractionConfig = this.currentProject.extraction_config || '';
+            this.generatingExtractionConfig = false;
+            this.testingExtraction = false;
+            this.extractionTestResult = '';
+            this.extractionTestError = '';
+            this.extractionTestPreview = '';
 
             this.parseUrlToParams();
             this.loadAPIConfig();
@@ -272,17 +281,18 @@ function appData() {
         async saveConfig() {
             if (!this.currentProjectID) return;
 
-            const schema = this.config.schema.trim();
-            if (!this.config.baseUrl.trim() || !schema) {
-                this.showToast('Base URL and Schema are required', 'error');
+            if (!this.config.baseUrl.trim()) {
+                this.showToast('Base URL is required', 'error');
                 return;
             }
 
-            try {
-                JSON.parse(schema);
-            } catch (e) {
-                this.showToast('Invalid JSON schema: ' + e.message, 'error');
-                return;
+            if (this.extractionConfig.trim()) {
+                try {
+                    JSON.parse(this.extractionConfig.trim());
+                } catch (e) {
+                    this.showToast('Invalid extraction config JSON: ' + e.message, 'error');
+                    return;
+                }
             }
 
             try {
@@ -292,10 +302,11 @@ function appData() {
                     body: JSON.stringify({
                         name: this.currentProject.name,
                         base_url: this.config.baseUrl.trim(),
-                        schema: schema,
-                        prompt: this.config.prompt.trim(),
+                        schema: this.config.schema || '{}',
+                        prompt: this.extractionPrompt.trim(),
                         provider: this.config.provider,
                         delay_ms: this.config.delay,
+                        extraction_config: this.extractionConfig.trim(),
                     }),
                 });
 
@@ -450,36 +461,6 @@ function appData() {
             if (this.currentProjectID) window.location.href = `/projects/${this.currentProjectID}/data.csv`;
         },
 
-        // ── AI Schema Generation ──
-        async generateSchema() {
-            const baseUrl = this.config.baseUrl.trim();
-            if (!baseUrl) { this.showToast('Please enter a Base URL first', 'error'); return; }
-            if (!this.aiPrompt.trim()) { this.showToast('Please describe what data you want to extract', 'error'); return; }
-
-            this.generatingSchema = true;
-
-            try {
-                const res = await fetch('/api/generate-schema', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: baseUrl, prompt: this.aiPrompt.trim(), provider: this.config.provider }),
-                });
-
-                const result = await res.json();
-
-                if (res.ok && result.schema) {
-                    this.config.schema = JSON.stringify(result.schema, null, 2);
-                    this.showToast(`Schema generated! (${result.tokens_used} tokens)`, 'success');
-                } else {
-                    this.showToast('Error: ' + (result.error || 'Failed to generate schema'), 'error');
-                }
-            } catch (e) {
-                this.showToast('Error: ' + e.message, 'error');
-            } finally {
-                this.generatingSchema = false;
-            }
-        },
-
         // ── Page Preview ──
         async previewPage() {
             const baseUrl = this.config.baseUrl.trim();
@@ -512,6 +493,86 @@ function appData() {
                 this.showToast('Error: ' + e.message, 'error');
             } finally {
                 this.pagePreview.loading = false;
+            }
+        },
+
+        // ── Extraction Config ──
+        async generateExtractionConfig() {
+            const baseUrl = this.config.baseUrl.trim();
+            if (!baseUrl) { this.showToast('Please enter a Base URL first', 'error'); return; }
+            if (!this.extractionPrompt.trim()) { this.showToast('Please describe what data to extract', 'error'); return; }
+
+            this.generatingExtractionConfig = true;
+            this.extractionTestResult = '';
+            this.extractionTestError = '';
+            this.extractionTestPreview = '';
+
+            try {
+                const res = await fetch('/api/generate-extraction-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: baseUrl,
+                        prompt: this.extractionPrompt.trim(),
+                        provider: this.config.provider,
+                    }),
+                });
+
+                const result = await res.json();
+
+                if (res.ok && result.config) {
+                    this.extractionConfig = JSON.stringify(result.config, null, 2);
+                    this.showToast(`Extraction config generated! (${result.tokens_used} tokens)`, 'success');
+                } else {
+                    this.showToast('Error: ' + (result.error || 'Failed to generate config'), 'error');
+                }
+            } catch (e) {
+                this.showToast('Error: ' + e.message, 'error');
+            } finally {
+                this.generatingExtractionConfig = false;
+            }
+        },
+
+        async testExtractionConfig() {
+            const baseUrl = this.config.baseUrl.trim();
+            if (!baseUrl) { this.showToast('Please enter a Base URL first', 'error'); return; }
+            if (!this.extractionConfig.trim()) { this.showToast('Please generate or enter an extraction config first', 'error'); return; }
+
+            let config;
+            try {
+                config = JSON.parse(this.extractionConfig.trim());
+            } catch (e) {
+                this.showToast('Invalid extraction config JSON: ' + e.message, 'error');
+                return;
+            }
+
+            this.testingExtraction = true;
+            this.extractionTestResult = '';
+            this.extractionTestError = '';
+            this.extractionTestPreview = '';
+
+            try {
+                const res = await fetch('/api/test-extraction-config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: baseUrl, config }),
+                });
+
+                const result = await res.json();
+
+                if (res.ok) {
+                    this.extractionTestResult = `${result.count} items extracted in ${result.duration_ms}ms`;
+                    this.extractionTestPreview = JSON.stringify(result.data, null, 2);
+                    this.showToast('Extraction test successful', 'success');
+                } else {
+                    this.extractionTestError = result.error || 'Extraction test failed';
+                    this.showToast('Error: ' + (result.error || 'Extraction test failed'), 'error');
+                }
+            } catch (e) {
+                this.extractionTestError = e.message;
+                this.showToast('Error: ' + e.message, 'error');
+            } finally {
+                this.testingExtraction = false;
             }
         },
 

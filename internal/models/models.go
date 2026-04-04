@@ -7,16 +7,17 @@ import (
 
 // Project represents a scraping project
 type Project struct {
-	ID         string    `json:"id" db:"id"`
-	Name       string    `json:"name" db:"name"`
-	BaseURL    string    `json:"base_url" db:"base_url"`
-	Schema     string    `json:"schema" db:"schema_json"`
-	Prompt     string    `json:"prompt" db:"prompt"`
-	Provider   string    `json:"provider" db:"provider"`
-	DelayMs    int       `json:"delay_ms" db:"delay_ms"`
-	APIEnabled bool      `json:"api_enabled" db:"api_enabled"`
-	CreatedAt  time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at" db:"updated_at"`
+	ID               string    `json:"id" db:"id"`
+	Name             string    `json:"name" db:"name"`
+	BaseURL          string    `json:"base_url" db:"base_url"`
+	Schema           string    `json:"schema" db:"schema_json"`
+	Prompt           string    `json:"prompt" db:"prompt"`
+	Provider         string    `json:"provider" db:"provider"`
+	DelayMs          int       `json:"delay_ms" db:"delay_ms"`
+	APIEnabled       bool      `json:"api_enabled" db:"api_enabled"`
+	ExtractionConfig string    `json:"extraction_config" db:"extraction_config"`
+	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // APIParam defines a parameter for the project's public API
@@ -24,7 +25,7 @@ type APIParam struct {
 	ID           int    `json:"id" db:"id"`
 	ProjectID    string `json:"project_id" db:"project_id"`
 	Name         string `json:"name" db:"name"`
-	Type         string `json:"type" db:"type"`           // "string" or "number"
+	Type         string `json:"type" db:"type"` // "string" or "number"
 	Required     bool   `json:"required" db:"required"`
 	DefaultValue string `json:"default_value" db:"default_value"`
 	Description  string `json:"description" db:"description"`
@@ -82,4 +83,15 @@ type LLMProvider struct {
 	CreatedAt time.Time `json:"created_at" db:"created_at"`
 }
 
+// ExtractionField defines a single field to extract from a page
+type ExtractionField struct {
+	Name      string `json:"name"`
+	Selector  string `json:"selector"`
+	Attribute string `json:"attribute"` // "text", "html", "href", "src", or any attribute name
+}
 
+// ExtractionConfig defines a selector-based extraction strategy
+type ExtractionConfig struct {
+	Container string            `json:"container"` // CSS selector for repeating container (empty = single page)
+	Fields    []ExtractionField `json:"fields"`
+}

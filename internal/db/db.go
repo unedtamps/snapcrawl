@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS projects (
     provider TEXT DEFAULT 'deepseek',
     delay_ms INTEGER DEFAULT 1000,
     api_enabled INTEGER DEFAULT 0,
+    extraction_config TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -92,6 +93,9 @@ func (db *DB) migrate() error {
 	// Add api_enabled column to existing databases (idempotent)
 	db.Exec("ALTER TABLE projects ADD COLUMN api_enabled INTEGER DEFAULT 0")
 
+	// Add extraction_config column to existing databases (idempotent)
+	db.Exec("ALTER TABLE projects ADD COLUMN extraction_config TEXT DEFAULT ''")
+
 	return nil
 }
 
@@ -110,9 +114,9 @@ func (db *DB) CreateProject(id, name, baseURL, schema, prompt, provider string, 
 func (db *DB) GetProject(id string) (*models.Project, error) {
 	var p models.Project
 	err := db.QueryRow(
-		"SELECT id, name, base_url, schema_json, prompt, provider, delay_ms, api_enabled, created_at, updated_at FROM projects WHERE id = ?",
+		"SELECT id, name, base_url, schema_json, prompt, provider, delay_ms, api_enabled, extraction_config, created_at, updated_at FROM projects WHERE id = ?",
 		id,
-	).Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.DelayMs, &p.APIEnabled, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.DelayMs, &p.APIEnabled, &p.ExtractionConfig, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +125,7 @@ func (db *DB) GetProject(id string) (*models.Project, error) {
 
 // GetAllProjects retrieves all projects
 func (db *DB) GetAllProjects() ([]models.Project, error) {
-	rows, err := db.Query("SELECT id, name, base_url, schema_json, prompt, provider, delay_ms, api_enabled, created_at, updated_at FROM projects ORDER BY created_at DESC")
+	rows, err := db.Query("SELECT id, name, base_url, schema_json, prompt, provider, delay_ms, api_enabled, extraction_config, created_at, updated_at FROM projects ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +134,7 @@ func (db *DB) GetAllProjects() ([]models.Project, error) {
 	var projects []models.Project
 	for rows.Next() {
 		var p models.Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.DelayMs, &p.APIEnabled, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.DelayMs, &p.APIEnabled, &p.ExtractionConfig, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		projects = append(projects, p)
@@ -143,6 +147,15 @@ func (db *DB) UpdateProject(id, name, baseURL, schema, prompt, provider string, 
 	_, err := db.Exec(
 		"UPDATE projects SET name = ?, base_url = ?, schema_json = ?, prompt = ?, provider = ?, delay_ms = ?, updated_at = ? WHERE id = ?",
 		name, baseURL, schema, prompt, provider, delayMs, time.Now(), id,
+	)
+	return err
+}
+
+// UpdateExtractionConfig updates only the extraction config for a project
+func (db *DB) UpdateExtractionConfig(projectID, extractionConfig string) error {
+	_, err := db.Exec(
+		"UPDATE projects SET extraction_config = ?, updated_at = ? WHERE id = ?",
+		extractionConfig, time.Now(), projectID,
 	)
 	return err
 }

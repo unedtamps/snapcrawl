@@ -22,6 +22,7 @@ import (
 	md "github.com/JohannesKaufmann/html-to-markdown/v2"
 
 	"webscraper/internal/db"
+	"webscraper/internal/extractor"
 	"webscraper/internal/models"
 	"webscraper/internal/openai"
 )
@@ -95,8 +96,9 @@ func main() {
 	// Page preview
 	r.Post("/api/preview-markdown", handlePreviewMarkdown)
 
-	// AI schema generation
-	r.Post("/api/generate-schema", handleGenerateSchema)
+	// Extraction config generation and testing
+	r.Post("/api/generate-extraction-config", handleGenerateExtractionConfig)
+	r.Post("/api/test-extraction-config", handleTestExtractionConfig)
 
 	// Direct AI API (for testing)
 	r.Post("/api/v2/ai/scrape", handleAIScrapeDirect)
@@ -217,10 +219,10 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate schema JSON
-	if req.Schema != "" {
-		if _, err := json.RawMessage(req.Schema).MarshalJSON(); err != nil {
-			http.Error(w, `{"error": "Invalid JSON schema"}`, http.StatusBadRequest)
+	if req.ExtractionConfig != "" {
+		var ec models.ExtractionConfig
+		if err := json.Unmarshal([]byte(req.ExtractionConfig), &ec); err != nil {
+			http.Error(w, `{"error": "Invalid extraction config JSON"}`, http.StatusBadRequest)
 			return
 		}
 	}
@@ -229,6 +231,8 @@ func handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error": "Failed to update project"}`, http.StatusInternalServerError)
 		return
 	}
+
+	database.UpdateExtractionConfig(id, req.ExtractionConfig)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -277,16 +281,9 @@ func getAIClient(providerID string) (*openai.Client, error) {
 func handleProjectScrape(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
-	// Get project config
 	project, err := database.GetProject(id)
 	if err != nil {
 		http.Error(w, `{"error": "Project not found"}`, http.StatusNotFound)
-		return
-	}
-
-	client, err := getAIClient(project.Provider)
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "AI client initialization failed: %s"}`, err.Error()), http.StatusBadRequest)
 		return
 	}
 
@@ -295,53 +292,79 @@ func handleProjectScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var schema map[string]interface{}
-	if err := json.Unmarshal([]byte(project.Schema), &schema); err != nil {
-		http.Error(w, `{"error": "Invalid schema in project config"}`, http.StatusInternalServerError)
-		return
-	}
-
-	// Scrape using OpenAI
 	start := time.Now()
-	// Fetch page content as Markdown
-	pageContent, fetchErr := fetchPageContent(project.BaseURL)
-	if fetchErr != nil {
-		log.Printf("Warning: failed to fetch page content: %v", fetchErr)
-		pageContent = ""
-	}
 
-	result, err := client.ExtractData(r.Context(), &openai.ExtractionRequest{
-		URL:     project.BaseURL,
-		Content: pageContent,
-		Schema:  schema,
-		Prompt:  project.Prompt,
-	})
-	duration := int(time.Since(start).Milliseconds())
+	if project.ExtractionConfig != "" && project.ExtractionConfig != "{}" {
+		var config models.ExtractionConfig
+		if err := json.Unmarshal([]byte(project.ExtractionConfig), &config); err != nil {
+			http.Error(w, `{"error": "Invalid extraction config in project"}`, http.StatusInternalServerError)
+			return
+		}
 
-	if err != nil {
-		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
+		if err := extractor.ValidateConfig(config); err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "Invalid extraction config: %s"}`, err.Error()), http.StatusBadRequest)
+			return
+		}
+
+		browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+			Headless: playwright.Bool(true),
+			Args: []string{
+				"--disable-http2", "--disable-quic", "--no-sandbox",
+				"--disable-setuid-sandbox", "--disable-dev-shm-usage",
+			},
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "Failed to launch browser: %s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		defer browser.Close()
+
+		browserCtx, err := browser.NewContext(playwright.BrowserNewContextOptions{
+			UserAgent:         playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+			IgnoreHttpsErrors: playwright.Bool(true),
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "Failed to create context: %s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+		defer browserCtx.Close()
+
+		page, err := browserCtx.NewPage()
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "Failed to create page: %s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		data, err := extractor.Extract(r.Context(), page, project.BaseURL, config)
+		duration := int(time.Since(start).Milliseconds())
+
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "Extraction failed: %s"}`, err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		resultMap := make(map[string]interface{})
+		if config.Container != "" {
+			resultMap["items"] = data
+		} else if len(data) > 0 {
+			resultMap = data[0]
+		}
+
+		if err := database.SaveScrapedData(id, project.BaseURL, resultMap, 0); err != nil {
+			log.Printf("Failed to save scraped data: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(models.ScrapeResponse{
+			URL:        project.BaseURL,
+			Data:       resultMap,
+			TokensUsed: 0,
+			Duration:   duration,
+		})
 		return
 	}
-	if result != nil && result.Error != "" {
-		http.Error(w, fmt.Sprintf(`{"error": "Extraction failed: %s"}`, result.Error), http.StatusInternalServerError)
-		return
-	}
 
-	// Save result to database
-	if err := database.SaveScrapedData(id, project.BaseURL, result.Data, result.TokensUsed); err != nil {
-		log.Printf("Failed to save scraped data: %v", err)
-	}
-
-	// Return response
-	resp := models.ScrapeResponse{
-		URL:        project.BaseURL,
-		Data:       result.Data,
-		TokensUsed: result.TokensUsed,
-		Duration:   duration,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	http.Error(w, `{"error": "No extraction config found. Please generate an extraction config for this project first."}`, http.StatusBadRequest)
 }
 
 func handleAIScrapeDirect(w http.ResponseWriter, r *http.Request) {
@@ -527,9 +550,92 @@ func handlePreviewMarkdown(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ============ Schema Generation Handler ============
+// fetchPageHTML loads a page with Playwright and returns cleaned HTML (all tags preserved)
+func fetchPageHTML(targetURL string) (string, error) {
+	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(true),
+		Args: []string{
+			"--disable-http2",
+			"--disable-quic",
+			"--no-sandbox",
+			"--disable-setuid-sandbox",
+			"--disable-dev-shm-usage",
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to launch browser: %w", err)
+	}
+	defer browser.Close()
 
-func handleGenerateSchema(w http.ResponseWriter, r *http.Request) {
+	context, err := browser.NewContext(playwright.BrowserNewContextOptions{
+		UserAgent:         playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		IgnoreHttpsErrors: playwright.Bool(true),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create context: %w", err)
+	}
+	defer context.Close()
+
+	page, err := context.NewPage()
+	if err != nil {
+		return "", fmt.Errorf("failed to create page: %w", err)
+	}
+
+	_, err = page.Goto(targetURL, playwright.PageGotoOptions{
+		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+		Timeout:   playwright.Float(30000),
+	})
+	if err != nil {
+		log.Printf("Navigation warning: %v", err)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	rawContent, err := page.Evaluate(`() => {
+		const selectors = ['script', 'style', 'noscript', 'svg', 'canvas', 'video', 'audio', 'iframe', 'map', 'object', 'meta', 'link'];
+		document.querySelectorAll(selectors.join(',')).forEach(el => el.remove());
+		
+		const elements = document.querySelectorAll('*');
+		for (let i = 0; i < elements.length; i++) {
+			const el = elements[i];
+			const attrs = el.attributes;
+			for (let j = attrs.length - 1; j >= 0; j--) {
+				const name = attrs[j].name;
+				if (!['href', 'src', 'alt', 'title', 'class', 'id', 'name', 'type', 'value', 'data-*', 'aria-*', 'role', 'rel', 'target', 'colspan', 'rowspan'].includes(name)) {
+					if (!name.startsWith('data-') && !name.startsWith('aria-')) {
+						el.removeAttribute(name);
+					}
+				}
+			}
+		}
+		
+		return document.body ? document.body.innerHTML : document.documentElement.innerHTML;
+	}`)
+
+	var htmlContent string
+	if err == nil {
+		if str, ok := rawContent.(string); ok {
+			htmlContent = str
+		}
+	}
+
+	if htmlContent == "" {
+		log.Printf("Falling back to raw page.Content()")
+		htmlContent, _ = page.Content()
+	}
+
+	re := regexp.MustCompile(`\s+`)
+	htmlContent = re.ReplaceAllString(htmlContent, " ")
+	htmlContent = strings.TrimSpace(htmlContent)
+
+	log.Printf("🧹 CleanedHTML size: %d bytes", len(htmlContent))
+
+	return htmlContent, nil
+}
+
+// ============ Extraction Config Handlers ============
+
+func handleGenerateExtractionConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL      string `json:"url"`
 		Prompt   string `json:"prompt"`
@@ -551,15 +657,13 @@ func handleGenerateSchema(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch page content as Markdown
-	pageContent, err := fetchPageContent(req.URL)
+	pageHTML, err := fetchPageHTML(req.URL)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "Failed to fetch page: %s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
-	// Generate schema using AI
-	result, err := client.GenerateSchema(r.Context(), req.URL, pageContent, req.Prompt)
+	result, err := client.GenerateExtractionConfig(r.Context(), req.URL, pageHTML, req.Prompt)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -570,12 +674,81 @@ func handleGenerateSchema(w http.ResponseWriter, r *http.Request) {
 	if result.Error != "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Schema generation failed: " + result.Error})
+		json.NewEncoder(w).Encode(map[string]string{"error": result.Error})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+func handleTestExtractionConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL    string                  `json:"url"`
+		Config models.ExtractionConfig `json:"config"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		http.Error(w, `{"error": "URL is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := extractor.ValidateConfig(req.Config); err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "Invalid extraction config: %s"}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+
+	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(true),
+		Args: []string{
+			"--disable-http2",
+			"--disable-quic",
+			"--no-sandbox",
+			"--disable-setuid-sandbox",
+			"--disable-dev-shm-usage",
+		},
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "Failed to launch browser: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	defer browser.Close()
+
+	context, err := browser.NewContext(playwright.BrowserNewContextOptions{
+		UserAgent:         playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		IgnoreHttpsErrors: playwright.Bool(true),
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "Failed to create context: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+	defer context.Close()
+
+	page, err := context.NewPage()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "Failed to create page: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	start := time.Now()
+	data, err := extractor.Extract(r.Context(), page, req.URL, req.Config)
+	duration := int(time.Since(start).Milliseconds())
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error": "Extraction failed: %s"}`, err.Error()), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"data":        data,
+		"count":       len(data),
+		"duration_ms": duration,
+	})
 }
 
 // ============ Data Export Handlers ============
@@ -695,14 +868,6 @@ func handlePublicScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := getAIClient(project.Provider)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{"error": "AI service misconfigured for this project: " + err.Error()})
-		return
-	}
-
 	if !project.APIEnabled {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -768,56 +933,84 @@ func handlePublicScrape(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[PUBLIC API] Project %s → scraping %s", project.Name, finalURL)
 
-	// Fetch page content
-	pageContent, fetchErr := fetchPageContent(finalURL)
-	if fetchErr != nil {
-		log.Printf("Warning: failed to fetch page: %v", fetchErr)
-		pageContent = ""
-	}
-
-	// Parse schema
-	var schema map[string]interface{}
-	if err := json.Unmarshal([]byte(project.Schema), &schema); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid schema in project config"})
-		return
-	}
-
-	// Extract data
 	start := time.Now()
-	result, err := client.ExtractData(r.Context(), &openai.ExtractionRequest{
-		URL:     finalURL,
-		Content: pageContent,
-		Schema:  schema,
-		Prompt:  project.Prompt,
-	})
-	duration := int(time.Since(start).Milliseconds())
 
-	if err != nil {
+	if project.ExtractionConfig != "" && project.ExtractionConfig != "{}" {
+		var config models.ExtractionConfig
+		if err := json.Unmarshal([]byte(project.ExtractionConfig), &config); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid extraction config in project"})
+			return
+		}
+
+		browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+			Headless: playwright.Bool(true),
+			Args: []string{
+				"--disable-http2", "--disable-quic", "--no-sandbox",
+				"--disable-setuid-sandbox", "--disable-dev-shm-usage",
+			},
+		})
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to launch browser"})
+			return
+		}
+		defer browser.Close()
+
+		browserCtx, err := browser.NewContext(playwright.BrowserNewContextOptions{
+			UserAgent:         playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+			IgnoreHttpsErrors: playwright.Bool(true),
+		})
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create context"})
+			return
+		}
+		defer browserCtx.Close()
+
+		page, err := browserCtx.NewPage()
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to create page"})
+			return
+		}
+
+		data, err := extractor.Extract(r.Context(), page, finalURL, config)
+		duration := int(time.Since(start).Milliseconds())
+
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Extraction failed: " + err.Error()})
+			return
+		}
+
+		resultMap := make(map[string]interface{})
+		if config.Container != "" {
+			resultMap["items"] = data
+		} else if len(data) > 0 {
+			resultMap = data[0]
+		}
+
+		database.SaveScrapedData(id, finalURL, resultMap, 0)
+
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		json.NewEncoder(w).Encode(models.ScrapeResponse{
+			URL:        finalURL,
+			Data:       resultMap,
+			TokensUsed: 0,
+			Duration:   duration,
+		})
 		return
 	}
-
-	if result != nil && result.Error != "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": result.Error})
-		return
-	}
-
-	// Save to DB
-	database.SaveScrapedData(id, finalURL, result.Data, result.TokensUsed)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(models.ScrapeResponse{
-		URL:        finalURL,
-		Data:       result.Data,
-		TokensUsed: result.TokensUsed,
-		Duration:   duration,
-	})
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]string{"error": "No extraction config found. Please generate an extraction config for this project first."})
 }
 
 // ============ Provider Handlers ============

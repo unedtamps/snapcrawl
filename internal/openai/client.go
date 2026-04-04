@@ -91,6 +91,13 @@ type SchemaResult struct {
 	Error      string                 `json:"error,omitempty"`
 }
 
+// ExtractionConfigResult contains a generated extraction config
+type ExtractionConfigResult struct {
+	Config     map[string]interface{} `json:"config"`
+	TokensUsed int                    `json:"tokens_used"`
+	Error      string                 `json:"error,omitempty"`
+}
+
 // ExtractData performs AI extraction from HTML
 func (c *Client) ExtractData(ctx context.Context, req *ExtractionRequest) (*ExtractionResult, error) {
 	start := time.Now()
@@ -399,7 +406,7 @@ func parseJSONResponse(content string) (map[string]interface{}, error) {
 
 	// Local/smaller LMs often output unquoted types (e.g. "field": string instead of "field": "string")
 	// and add inline comments. We need to clean these up before parsing.
-	
+
 	// 1. Remove inline comments (// ...) but BE CAREFUL not to match http:// or https://
 	// We only match // if it's preceded by whitespace
 	commentRe := regexp.MustCompile(`(?m)\s+//.*$`)
@@ -597,13 +604,189 @@ func (c *Client) generateSchemaLocal(ctx context.Context, url, content, userProm
 		// Parsing failed. Save the error and append it to the prompt for the next retry iteration
 		lastErr = err
 		userMsg += fmt.Sprintf("\n\n---\nWARNING: Your previous response was INVALID JSON or contained ACTUAL DATA. The JSON parser returned this error:\n%v\n\nPlease remember to NEVER extract real data, only output the schema structure using \"string\" or \"number\" as values. Fix the syntax error and return ONLY the completely valid JSON object.", err)
-		
+
 		time.Sleep(time.Duration(i+1) * time.Second)
 	}
 
 	// If we exhausted retries and still failed to parse
 	return &SchemaResult{
 		Error: fmt.Sprintf("Failed to generate valid schema after %d attempts. Last error: %v", c.maxRetries, lastErr),
+	}, nil
+}
+
+const extractionConfigSystemPrompt = `You are an expert CSS selector and web scraping specialist. Your task is to analyze the provided HTML and generate a JSON extraction config that uses CSS selectors to extract the data the user wants.
+
+Rules:
+1. Output ONLY a valid JSON object. No text before or after.
+2. The JSON must have this exact structure:
+   {
+     "container": "CSS selector for repeating items (empty string if single page)",
+     "fields": [
+       {"name": "field_name", "selector": "CSS selector relative to container", "attribute": "text|html|href|src|attribute_name"}
+     ]
+   }
+3. Use "container" when there are multiple repeating items (like product cards, list items, table rows).
+4. Use empty string "" for "container" when extracting from a single page (like a detail page).
+5. For "attribute", use: "text" for text content, "href" for links, "src" for images, or any HTML attribute name.
+6. Keep field names short, descriptive, and snake_case.
+7. Use precise CSS selectors that uniquely target the desired elements.
+8. Do NOT include any comments or explanations.
+9. Do NOT extract actual data values - only define the selectors.
+
+Example for product listing:
+{"container":".product-card","fields":[{"name":"title","selector":"h2.product-title","attribute":"text"},{"name":"price","selector":".price","attribute":"text"},{"name":"image","selector":"img","attribute":"src"},{"name":"link","selector":"a","attribute":"href"}]}
+
+Example for single page:
+{"container":"","fields":[{"name":"title","selector":"h1","attribute":"text"},{"name":"author","selector":".author-name","attribute":"text"},{"name":"date","selector":"time","attribute":"text"}]}`
+
+// GenerateExtractionConfig uses AI to generate a selector-based extraction config from HTML
+func (c *Client) GenerateExtractionConfig(ctx context.Context, url, html, userPrompt string) (*ExtractionConfigResult, error) {
+	if strings.Contains(c.baseURL, "127.0.0.1") || strings.Contains(c.baseURL, "localhost") {
+		return c.generateExtractionConfigLocal(ctx, url, html, userPrompt)
+	}
+
+	userMsg := fmt.Sprintf("URL: %s\n\nUser wants: %s\n\nHTML:\n%s", url, userPrompt, html)
+
+	var resp openai.ChatCompletionResponse
+	var err error
+
+	for i := 0; i < c.maxRetries; i++ {
+		resp, err = c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+			Model: c.model,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: extractionConfigSystemPrompt},
+				{Role: openai.ChatMessageRoleUser, Content: userMsg},
+			},
+			MaxTokens:   2000,
+			Temperature: 0.2,
+		})
+
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Duration(i+1) * time.Second)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("extraction config generation failed after %d retries: %w", c.maxRetries, err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("API returned no choices")
+	}
+
+	responseContent := resp.Choices[0].Message.Content
+	config, err := parseJSONResponse(responseContent)
+	if err != nil {
+		return &ExtractionConfigResult{
+			Error: fmt.Sprintf("Failed to parse generated config: %v", err),
+		}, nil
+	}
+
+	return &ExtractionConfigResult{
+		Config:     config,
+		TokensUsed: resp.Usage.TotalTokens,
+	}, nil
+}
+
+func (c *Client) generateExtractionConfigLocal(ctx context.Context, url, html, userPrompt string) (*ExtractionConfigResult, error) {
+	maxLen := 8000
+	if len(html) > maxLen {
+		html = html[:maxLen] + "\n\n...[HTML TRUNCATED]..."
+	}
+
+	userMsg := fmt.Sprintf("URL: %s\n\nUser wants: %s\n\nHTML Snapshot:\n%s", url, userPrompt, html)
+
+	endpoint := c.baseURL
+	if !strings.HasSuffix(endpoint, "/api/v1/chat") {
+		endpoint = strings.TrimRight(endpoint, "/") + "/api/v1/chat"
+	}
+
+	var config map[string]interface{}
+	var lastErr error
+
+	for i := 0; i < c.maxRetries; i++ {
+		payload := localLMRequest{
+			Model:        c.model,
+			SystemPrompt: extractionConfigSystemPrompt,
+			Input:        userMsg,
+		}
+
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal local request: %w", err)
+		}
+
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		client := &http.Client{Timeout: 120 * time.Second}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(i+1) * time.Second)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			lastErr = fmt.Errorf("API error %d: %s", resp.StatusCode, string(bodyBytes))
+			time.Sleep(time.Duration(i+1) * time.Second)
+			continue
+		}
+
+		var lmResp localLMResponse
+		err = json.NewDecoder(resp.Body).Decode(&lmResp)
+		resp.Body.Close()
+
+		if err != nil {
+			lastErr = fmt.Errorf("failed to decode response: %w", err)
+			time.Sleep(time.Duration(i+1) * time.Second)
+			continue
+		}
+
+		var responseContent string
+		if len(lmResp.Choices) > 0 {
+			responseContent = lmResp.Choices[0].Message.Content
+		} else if len(lmResp.Output) > 0 {
+			for _, out := range lmResp.Output {
+				if out.Type == "message" {
+					responseContent = out.Content
+					break
+				}
+			}
+			if responseContent == "" {
+				responseContent = lmResp.Output[len(lmResp.Output)-1].Content
+			}
+		} else if lmResp.Response != "" {
+			responseContent = lmResp.Response
+		} else if lmResp.Message != "" {
+			responseContent = lmResp.Message
+		}
+
+		config, err = parseJSONResponse(responseContent)
+		if err == nil {
+			return &ExtractionConfigResult{
+				Config:     config,
+				TokensUsed: 0,
+			}, nil
+		}
+
+		lastErr = err
+		userMsg += fmt.Sprintf("\n\n---\nWARNING: Your previous response was INVALID JSON. Parser error: %v\n\nFix the syntax and return ONLY the valid JSON object.", err)
+		time.Sleep(time.Duration(i+1) * time.Second)
+	}
+
+	return &ExtractionConfigResult{
+		Error: fmt.Sprintf("Failed to generate valid extraction config after %d attempts. Last error: %v", c.maxRetries, lastErr),
 	}, nil
 }
 

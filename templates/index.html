@@ -113,50 +113,40 @@
                                     </select>
                                 </div>
 
-                                <!-- Page Preview Section -->
-                                <div class="form-group page-preview-section">
-                                    <label>📄 Page Preview</label>
-                                    <small>Fetch the page and see its Markdown version before scraping</small>
-                                    <div style="margin-top: 10px;">
-                                        <button type="button" @click="previewPage()" class="btn-secondary btn-sm" :disabled="pagePreview.loading">
-                                            <span x-show="pagePreview.loading" class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span>
-                                            <span x-text="pagePreview.loading ? 'Fetching...' : 'Fetch & Preview'"></span>
-                                        </button>
-                                        <span x-show="pagePreview.size && !pagePreview.loading" style="margin-left: 10px; font-size: 0.78rem; color: var(--text-muted);" x-text="pagePreview.size"></span>
+                                <!-- Extraction Config Section -->
+                                <div class="form-group extraction-config-section">
+                                    <label>🔧 Extraction Config</label>
+                                    <small>LLM generates Playwright selectors for fast, direct DOM extraction (no LLM call during scraping)</small>
+
+                                    <div class="form-group" style="margin-top: 12px; margin-bottom: 10px;">
+                                        <label>Extraction Prompt</label>
+                                        <textarea x-model="extractionPrompt" class="textarea" rows="3" placeholder="Describe what data to extract, e.g: product name, price, image, and link from each product card"></textarea>
                                     </div>
 
-                                    <div x-show="pagePreview.loading" style="margin-top: 12px; padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.85rem; background: var(--bg-elevated); border-radius: var(--radius-sm);">
-                                        Fetching page content, please wait...
-                                    </div>
-
-                                    <div x-show="pagePreview.error" style="margin-top: 12px; padding: 12px 16px; background: var(--danger-soft); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 0.82rem;" x-text="pagePreview.error"></div>
-
-                                    <div x-show="pagePreview.markdown && !pagePreview.loading" style="margin-top: 12px;">
-                                        <pre class="markdown-preview" x-text="pagePreview.markdown"></pre>
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>JSON Schema</label>
-                                    <textarea x-model="config.schema" class="textarea" rows="6" placeholder='{"items": {"type": "array", "items": {"name": "string"}}}' required></textarea>
-                                    <small>Define the structure of data you want to extract</small>
-                                </div>
-                                <div class="form-group ai-generate-section">
-                                    <label>✨ AI Auto-Generate Schema</label>
-                                    <textarea x-model="aiPrompt" class="textarea" rows="2" placeholder="Describe what data you want, e.g: I want all product names, prices, and ratings..."></textarea>
-                                    <div class="ai-generate-actions">
-                                        <button type="button" @click="generateSchema()" class="btn-ai" :disabled="generatingSchema">
-                                            <span x-show="!generatingSchema" class="btn-ai-icon">✨</span>
-                                            <span x-show="generatingSchema" class="spinner"></span>
-                                            <span x-text="generatingSchema ? 'Generating...' : 'Generate Schema'"></span>
+                                    <div class="extraction-prompt-row">
+                                        <button type="button" @click="generateExtractionConfig()" class="btn-ai" :disabled="generatingExtractionConfig" style="flex-shrink:0;">
+                                            <span x-show="generatingExtractionConfig" class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span>
+                                            <span x-text="generatingExtractionConfig ? 'Generating...' : '✨ Generate Config'"></span>
                                         </button>
                                     </div>
-                                    <small>AI will analyze the page and create the JSON schema for you</small>
+
+                                    <textarea x-model="extractionConfig" class="textarea extraction-textarea" rows="8" placeholder='{"container":".product-card","fields":[{"name":"title","selector":"h2","attribute":"text"},{"name":"price","selector":".price","attribute":"text"}]}'></textarea>
+
+                                    <div class="extraction-actions">
+                                        <button type="button" @click="testExtractionConfig()" class="btn-secondary btn-sm" :disabled="testingExtraction">
+                                            <span x-show="testingExtraction" class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span>
+                                            <span x-text="testingExtraction ? 'Testing...' : '▶ Test Extraction'"></span>
+                                        </button>
+                                        <span x-show="extractionTestResult" style="margin-left: 10px; font-size: 0.78rem; color: var(--success);" x-text="extractionTestResult"></span>
+                                    </div>
+
+                                    <div x-show="extractionTestError" style="margin-top: 10px; padding: 10px 14px; background: var(--danger-soft); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 0.82rem;" x-text="extractionTestError"></div>
+
+                                    <div x-show="extractionTestPreview && !extractionTestError" style="margin-top: 10px;">
+                                        <pre class="extraction-preview" x-text="extractionTestPreview"></pre>
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label>Instructions (optional)</label>
-                                    <textarea x-model="config.prompt" class="textarea" rows="3" placeholder="Additional instructions for the AI..."></textarea>
-                                </div>
+
                                 <div class="form-group">
                                     <label>Delay (ms)</label>
                                     <input type="number" x-model.number="config.delay" class="input-field" min="0">

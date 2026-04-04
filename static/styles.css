@@ -525,6 +525,53 @@ select.input-field {
     margin: 0;
 }
 
+/* ── Extraction Config ── */
+.extraction-config-section {
+    background: var(--accent-soft);
+    border: 1px solid rgba(9, 146, 194, 0.12);
+    border-radius: var(--radius-sm);
+    padding: 16px !important;
+    margin-bottom: 18px;
+}
+
+.extraction-prompt-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.extraction-prompt-row .input-field {
+    flex: 1;
+}
+
+.extraction-textarea {
+    min-height: 140px;
+    font-size: 0.75rem;
+}
+
+.extraction-actions {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.extraction-preview {
+    background: #1e293b;
+    color: #a5f3fc;
+    padding: 14px;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    font-size: 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+    margin: 0;
+}
+
 /* ── AI Generate ── */
 .ai-generate-section {
     background: var(--accent-soft);
