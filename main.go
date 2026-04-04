@@ -92,6 +92,9 @@ func main() {
 	r.Get("/projects/{id}/data", handleGetProjectData)
 	r.Get("/projects/{id}/data.csv", handleExportCSV)
 
+	// Page preview
+	r.Post("/api/preview-markdown", handlePreviewMarkdown)
+
 	// AI schema generation
 	r.Post("/api/generate-schema", handleGenerateSchema)
 
@@ -492,6 +495,38 @@ func fetchPageContent(targetURL string) (string, error) {
 
 	return markdown, nil
 }
+
+// ============ Page Preview Handler ============
+
+func handlePreviewMarkdown(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		http.Error(w, `{"error": "URL is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	pageContent, err := fetchPageContent(req.URL)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"markdown": pageContent,
+		"size":     fmt.Sprintf("%d bytes", len(pageContent)),
+	})
+}
+
 // ============ Schema Generation Handler ============
 
 func handleGenerateSchema(w http.ResponseWriter, r *http.Request) {

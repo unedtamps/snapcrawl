@@ -23,6 +23,8 @@ function appData() {
         aiPrompt: '',
         generatingSchema: false,
 
+        pagePreview: { markdown: '', loading: false, error: '', size: '' },
+
         apiConfig: {
             enabled: false,
             params: [{ name: '', type: 'string', required: false, default_value: '', description: '' }],
@@ -168,6 +170,8 @@ function appData() {
             this.config.prompt = this.currentProject.prompt || '';
             this.config.provider = this.currentProject.provider || 'deepseek';
             this.config.delay = this.currentProject.delay_ms || 1000;
+
+            this.pagePreview = { markdown: '', loading: false, error: '', size: '' };
 
             this.parseUrlToParams();
             this.loadAPIConfig();
@@ -473,6 +477,41 @@ function appData() {
                 this.showToast('Error: ' + e.message, 'error');
             } finally {
                 this.generatingSchema = false;
+            }
+        },
+
+        // ── Page Preview ──
+        async previewPage() {
+            const baseUrl = this.config.baseUrl.trim();
+            if (!baseUrl) { this.showToast('Please enter a Base URL first', 'error'); return; }
+
+            this.pagePreview.loading = true;
+            this.pagePreview.error = '';
+            this.pagePreview.markdown = '';
+            this.pagePreview.size = '';
+
+            try {
+                const res = await fetch('/api/preview-markdown', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: baseUrl }),
+                });
+
+                const result = await res.json();
+
+                if (res.ok) {
+                    this.pagePreview.markdown = result.markdown;
+                    this.pagePreview.size = result.size;
+                    this.showToast('Page preview loaded', 'success');
+                } else {
+                    this.pagePreview.error = result.error || 'Failed to fetch page';
+                    this.showToast('Error: ' + (result.error || 'Failed to fetch page'), 'error');
+                }
+            } catch (e) {
+                this.pagePreview.error = e.message;
+                this.showToast('Error: ' + e.message, 'error');
+            } finally {
+                this.pagePreview.loading = false;
             }
         },
 

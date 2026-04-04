@@ -500,6 +500,31 @@ select.input-field {
     color: var(--danger);
 }
 
+/* ── Page Preview ── */
+.page-preview-section {
+    background: var(--accent-soft);
+    border: 1px solid rgba(9, 146, 194, 0.12);
+    border-radius: var(--radius-sm);
+    padding: 16px !important;
+    margin-bottom: 18px;
+}
+
+.markdown-preview {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 16px;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    font-size: 0.78rem;
+    font-family: 'JetBrains Mono', monospace;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+    margin: 0;
+}
+
 /* ── AI Generate ── */
 .ai-generate-section {
     background: var(--accent-soft);
