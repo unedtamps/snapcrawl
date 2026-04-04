@@ -247,6 +247,18 @@ func getAIClient(providerID string) (*openai.Client, error) {
 	if providerID == "" {
 		return nil, fmt.Errorf("provider is required")
 	}
+
+	// Fallback for legacy string providers (e.g. "deepseek" or "openai")
+	// If the ID is not completely numeric, pick the first configured provider
+	if !regexp.MustCompile(`^\d+$`).MatchString(providerID) {
+		providers, err := database.GetLLMProviders()
+		if err == nil && len(providers) > 0 {
+			providerID = fmt.Sprintf("%d", providers[0].ID)
+		} else {
+			return nil, fmt.Errorf("please configure an AI Provider in the Settings menu first")
+		}
+	}
+
 	p, err := database.GetLLMProviderByID(providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get provider details: %w", err)
