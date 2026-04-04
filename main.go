@@ -633,6 +633,108 @@ func fetchPageHTML(targetURL string) (string, error) {
 	return htmlContent, nil
 }
 
+// fetchPageDOMTree loads a page and returns a compact text-based DOM tree representation
+func fetchPageDOMTree(targetURL string) (string, error) {
+	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(true),
+		Args: []string{
+			"--disable-http2", "--disable-quic", "--no-sandbox",
+			"--disable-setuid-sandbox", "--disable-dev-shm-usage",
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to launch browser: %w", err)
+	}
+	defer browser.Close()
+
+	browserCtx, err := browser.NewContext(playwright.BrowserNewContextOptions{
+		UserAgent:         playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		IgnoreHttpsErrors: playwright.Bool(true),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create context: %w", err)
+	}
+	defer browserCtx.Close()
+
+	page, err := browserCtx.NewPage()
+	if err != nil {
+		return "", fmt.Errorf("failed to create page: %w", err)
+	}
+
+	_, err = page.Goto(targetURL, playwright.PageGotoOptions{
+		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+		Timeout:   playwright.Float(30000),
+	})
+	if err != nil {
+		log.Printf("Navigation warning: %v", err)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	result, err := page.Evaluate(`() => {
+		const skip = new Set(['SCRIPT', 'STYLE', 'NOScript', 'SVG', 'CANVAS', 'VIDEO', 'AUDIO', 'IFRAME', 'MAP', 'OBJECT', 'META', 'LINK']);
+		const keepAttrs = new Set(['href', 'src', 'alt', 'title', 'class', 'id', 'name', 'type', 'value', 'role', 'rel', 'target', 'colspan', 'rowspan', 'for', 'placeholder', 'action', 'method']);
+		
+		function buildTree(el, depth) {
+			if (depth > 8) return [];
+			const lines = [];
+			const children = Array.from(el.children);
+			
+			for (const child of children) {
+				const tag = child.tagName.toLowerCase();
+				if (skip.has(child.tagName)) continue;
+				
+				const indent = '  '.repeat(depth);
+				
+				let attrs = '';
+				for (const a of child.attributes) {
+					if (keepAttrs.has(a.name) || a.name.startsWith('data-') || a.name.startsWith('aria-')) {
+						if (a.name === 'class') {
+							attrs += ' class="' + a.value.split(' ').slice(0, 3).join(' ') + '"';
+						} else if (a.value.length < 80) {
+							attrs += ' ' + a.name + '="' + a.value + '"';
+						}
+					}
+				}
+				
+				const text = (child.innerText || '').trim();
+				const shortText = text.length > 60 ? text.substring(0, 60) + '...' : text;
+				
+				if (child.children.length === 0 || shortText) {
+					lines.push(indent + '<' + tag + attrs + '>' + (shortText ? ' ' + shortText : '') + '</' + tag + '>');
+				} else {
+					lines.push(indent + '<' + tag + attrs + '>');
+					lines.push(...buildTree(child, depth + 1));
+					lines.push(indent + '</' + tag + '>');
+				}
+			}
+			return lines;
+		}
+		
+		return buildTree(document.body, 0).join('\n');
+	}`)
+
+	var treeContent string
+	if err == nil {
+		if str, ok := result.(string); ok {
+			treeContent = str
+		}
+	}
+
+	if treeContent == "" {
+		log.Printf("Falling back to cleaned HTML for DOM tree")
+		treeContent, _ = page.Content()
+		re := regexp.MustCompile(`\s+`)
+		treeContent = re.ReplaceAllString(treeContent, " ")
+		if len(treeContent) > 12000 {
+			treeContent = treeContent[:12000]
+		}
+	}
+
+	log.Printf("🌳 DOM Tree size: %d bytes", len(treeContent))
+	return treeContent, nil
+}
+
 // ============ Extraction Config Handlers ============
 
 func handleGenerateExtractionConfig(w http.ResponseWriter, r *http.Request) {
@@ -657,13 +759,13 @@ func handleGenerateExtractionConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pageHTML, err := fetchPageHTML(req.URL)
+	pageContent, err := fetchPageHTML(req.URL)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "Failed to fetch page: %s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
-	result, err := client.GenerateExtractionConfig(r.Context(), req.URL, pageHTML, req.Prompt)
+	result, err := client.GenerateExtractionConfig(r.Context(), req.URL, pageContent, req.Prompt)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -676,6 +778,19 @@ func handleGenerateExtractionConfig(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": result.Error})
 		return
+	}
+
+	// Post-process: strip pseudo-selectors (::text, ::before, etc.) from any field selectors
+	if cfg, ok := result.Config["fields"]; ok {
+		if fields, ok := cfg.([]interface{}); ok {
+			for _, f := range fields {
+				if fm, ok := f.(map[string]interface{}); ok {
+					if sel, ok := fm["selector"].(string); ok {
+						fm["selector"] = regexp.MustCompile(`::\w+`).ReplaceAllString(sel, "")
+					}
+				}
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

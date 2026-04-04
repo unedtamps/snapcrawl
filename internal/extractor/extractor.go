@@ -3,11 +3,20 @@ package extractor
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/playwright-community/playwright-go"
 	"webscraper/internal/models"
 )
+
+var pseudoRe = regexp.MustCompile(`::\w+`)
+
+func cleanSelector(sel string) string {
+	sel = pseudoRe.ReplaceAllString(sel, "")
+	sel = strings.TrimSpace(sel)
+	return sel
+}
 
 // Extract runs a selector-based extraction config against a URL using Playwright
 func Extract(ctx context.Context, page playwright.Page, targetURL string, config models.ExtractionConfig) ([]map[string]interface{}, error) {
@@ -19,17 +28,17 @@ func Extract(ctx context.Context, page playwright.Page, targetURL string, config
 		return nil, fmt.Errorf("navigation failed: %w", err)
 	}
 
-	// Wait for network to settle
 	page.WaitForLoadState(playwright.PageWaitForLoadStateOptions{
 		State: playwright.LoadStateDomcontentloaded,
 	})
 
 	var results []map[string]interface{}
+	cleanContainer := cleanSelector(config.Container)
 
-	if config.Container != "" {
-		containers, err := page.QuerySelectorAll(config.Container)
+	if cleanContainer != "" {
+		containers, err := page.QuerySelectorAll(cleanContainer)
 		if err != nil {
-			return nil, fmt.Errorf("failed to query container '%s': %w", config.Container, err)
+			return nil, fmt.Errorf("failed to query container '%s': %w", cleanContainer, err)
 		}
 
 		for _, container := range containers {
@@ -59,13 +68,14 @@ func Extract(ctx context.Context, page playwright.Page, targetURL string, config
 }
 
 func extractField(container playwright.ElementHandle, field models.ExtractionField) (interface{}, error) {
-	if field.Selector == "" {
+	sel := cleanSelector(field.Selector)
+	if sel == "" {
 		return "", nil
 	}
 
-	el, err := container.QuerySelector(field.Selector)
+	el, err := container.QuerySelector(sel)
 	if err != nil {
-		return "", fmt.Errorf("selector '%s': %w", field.Selector, err)
+		return "", fmt.Errorf("selector '%s': %w", sel, err)
 	}
 	if el == nil {
 		return "", nil
@@ -75,13 +85,14 @@ func extractField(container playwright.ElementHandle, field models.ExtractionFie
 }
 
 func extractFieldFromPage(page playwright.Page, field models.ExtractionField) (interface{}, error) {
-	if field.Selector == "" {
+	sel := cleanSelector(field.Selector)
+	if sel == "" {
 		return "", nil
 	}
 
-	el, err := page.QuerySelector(field.Selector)
+	el, err := page.QuerySelector(sel)
 	if err != nil {
-		return "", fmt.Errorf("selector '%s': %w", field.Selector, err)
+		return "", fmt.Errorf("selector '%s': %w", sel, err)
 	}
 	if el == nil {
 		return "", nil

@@ -68,6 +68,11 @@ func MustNew() *Client {
 	return client
 }
 
+// GetBaseURL returns the client's base URL
+func (c *Client) GetBaseURL() string {
+	return c.baseURL
+}
+
 // ExtractionRequest contains data for extraction
 type ExtractionRequest struct {
 	URL     string                 `json:"url"`
@@ -690,12 +695,12 @@ func (c *Client) GenerateExtractionConfig(ctx context.Context, url, html, userPr
 }
 
 func (c *Client) generateExtractionConfigLocal(ctx context.Context, url, html, userPrompt string) (*ExtractionConfigResult, error) {
-	maxLen := 8000
+	maxLen := 15000
 	if len(html) > maxLen {
-		html = html[:maxLen] + "\n\n...[HTML TRUNCATED]..."
+		html = html[:maxLen] + "\n\n...[CONTENT TRUNCATED]..."
 	}
 
-	userMsg := fmt.Sprintf("URL: %s\n\nUser wants: %s\n\nHTML Snapshot:\n%s", url, userPrompt, html)
+	userMsg := fmt.Sprintf("URL: %s\n\nUser wants: %s\n\nHTML:\n%s", url, userPrompt, html)
 
 	endpoint := c.baseURL
 	if !strings.HasSuffix(endpoint, "/api/v1/chat") {
