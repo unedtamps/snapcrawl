@@ -22,6 +22,8 @@ function appData() {
 
         extractionPrompt: '',
         extractionConfig: '',
+        extractionTemperature: 0.2,
+        extractionMaxTokens: 2000,
         generatingExtractionConfig: false,
         testingExtraction: false,
         extractionTestResult: '',
@@ -176,6 +178,8 @@ function appData() {
 
             this.extractionPrompt = this.currentProject.prompt || '';
             this.extractionConfig = this.currentProject.extraction_config || '';
+            this.extractionTemperature = 0.2;
+            this.extractionMaxTokens = 2000;
             this.generatingExtractionConfig = false;
             this.testingExtraction = false;
             this.extractionTestResult = '';
@@ -515,6 +519,8 @@ function appData() {
                         url: baseUrl,
                         prompt: this.extractionPrompt.trim(),
                         provider: this.config.provider,
+                        temperature: this.extractionTemperature,
+                        max_tokens: this.extractionMaxTokens,
                     }),
                 });
 

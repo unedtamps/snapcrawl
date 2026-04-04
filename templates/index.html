@@ -123,8 +123,16 @@
                                         <textarea x-model="extractionPrompt" class="textarea" rows="3" placeholder="Describe what data to extract, e.g: product name, price, image, and link from each product card"></textarea>
                                     </div>
 
-                                    <div class="extraction-prompt-row">
-                                        <button type="button" @click="generateExtractionConfig()" class="btn-ai" :disabled="generatingExtractionConfig" style="flex-shrink:0;">
+                                    <div class="extraction-params-row">
+                                        <div class="param-field">
+                                            <label>Temperature</label>
+                                            <input type="number" x-model.number="extractionTemperature" class="input-field input-sm" min="0" max="2" step="0.1" placeholder="0.2">
+                                        </div>
+                                        <div class="param-field">
+                                            <label>Max Tokens</label>
+                                            <input type="number" x-model.number="extractionMaxTokens" class="input-field input-sm" min="100" max="8000" step="100" placeholder="2000">
+                                        </div>
+                                        <button type="button" @click="generateExtractionConfig()" class="btn-ai" :disabled="generatingExtractionConfig" style="flex-shrink:0; align-self: flex-end;">
                                             <span x-show="generatingExtractionConfig" class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span>
                                             <span x-text="generatingExtractionConfig ? 'Generating...' : '✨ Generate Config'"></span>
                                         </button>

@@ -739,9 +739,11 @@ func fetchPageDOMTree(targetURL string) (string, error) {
 
 func handleGenerateExtractionConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		URL      string `json:"url"`
-		Prompt   string `json:"prompt"`
-		Provider string `json:"provider"`
+		URL         string  `json:"url"`
+		Prompt      string  `json:"prompt"`
+		Provider    string  `json:"provider"`
+		Temperature float64 `json:"temperature"`
+		MaxTokens   int     `json:"max_tokens"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error": "Invalid JSON"}`, http.StatusBadRequest)
@@ -751,6 +753,13 @@ func handleGenerateExtractionConfig(w http.ResponseWriter, r *http.Request) {
 	if req.URL == "" || req.Prompt == "" {
 		http.Error(w, `{"error": "Both url and prompt are required"}`, http.StatusBadRequest)
 		return
+	}
+
+	if req.Temperature <= 0 {
+		req.Temperature = 0.2
+	}
+	if req.MaxTokens <= 0 {
+		req.MaxTokens = 2000
 	}
 
 	client, err := getAIClient(req.Provider)
@@ -765,7 +774,7 @@ func handleGenerateExtractionConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := client.GenerateExtractionConfig(r.Context(), req.URL, pageContent, req.Prompt)
+	result, err := client.GenerateExtractionConfig(r.Context(), req.URL, pageContent, req.Prompt, req.Temperature, req.MaxTokens)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)

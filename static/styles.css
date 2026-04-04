@@ -545,6 +545,32 @@ select.input-field {
     flex: 1;
 }
 
+.extraction-params-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    margin-top: 10px;
+    margin-bottom: 10px;
+}
+
+.extraction-params-row .param-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.extraction-params-row .param-field label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.extraction-params-row .input-sm {
+    width: 90px;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+}
+
 .extraction-textarea {
     min-height: 140px;
     font-size: 0.75rem;

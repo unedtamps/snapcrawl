@@ -206,9 +206,10 @@ Rules:
 }
 
 type localLMRequest struct {
-	Model        string `json:"model"`
-	SystemPrompt string `json:"system_prompt"`
-	Input        string `json:"input"`
+	Model        string  `json:"model"`
+	SystemPrompt string  `json:"system_prompt"`
+	Input        string  `json:"input"`
+	Temperature  float64 `json:"temperature,omitempty"`
 }
 
 // localLMResponse handles various local LM response shapes
@@ -645,9 +646,9 @@ Example for single page:
 {"container":"","fields":[{"name":"title","selector":"h1","attribute":"text"},{"name":"author","selector":".author-name","attribute":"text"},{"name":"date","selector":"time","attribute":"text"}]}`
 
 // GenerateExtractionConfig uses AI to generate a selector-based extraction config from HTML
-func (c *Client) GenerateExtractionConfig(ctx context.Context, url, html, userPrompt string) (*ExtractionConfigResult, error) {
+func (c *Client) GenerateExtractionConfig(ctx context.Context, url, html, userPrompt string, temperature float64, maxTokens int) (*ExtractionConfigResult, error) {
 	if strings.Contains(c.baseURL, "127.0.0.1") || strings.Contains(c.baseURL, "localhost") {
-		return c.generateExtractionConfigLocal(ctx, url, html, userPrompt)
+		return c.generateExtractionConfigLocal(ctx, url, html, userPrompt, temperature, maxTokens)
 	}
 
 	userMsg := fmt.Sprintf("URL: %s\n\nUser wants: %s\n\nHTML:\n%s", url, userPrompt, html)
@@ -662,8 +663,8 @@ func (c *Client) GenerateExtractionConfig(ctx context.Context, url, html, userPr
 				{Role: openai.ChatMessageRoleSystem, Content: extractionConfigSystemPrompt},
 				{Role: openai.ChatMessageRoleUser, Content: userMsg},
 			},
-			MaxTokens:   2000,
-			Temperature: 0.2,
+			MaxTokens:   maxTokens,
+			Temperature: float32(temperature),
 		})
 
 		if err == nil {
@@ -694,7 +695,7 @@ func (c *Client) GenerateExtractionConfig(ctx context.Context, url, html, userPr
 	}, nil
 }
 
-func (c *Client) generateExtractionConfigLocal(ctx context.Context, url, html, userPrompt string) (*ExtractionConfigResult, error) {
+func (c *Client) generateExtractionConfigLocal(ctx context.Context, url, html, userPrompt string, temperature float64, maxTokens int) (*ExtractionConfigResult, error) {
 	maxLen := 15000
 	if len(html) > maxLen {
 		html = html[:maxLen] + "\n\n...[CONTENT TRUNCATED]..."
@@ -715,6 +716,7 @@ func (c *Client) generateExtractionConfigLocal(ctx context.Context, url, html, u
 			Model:        c.model,
 			SystemPrompt: extractionConfigSystemPrompt,
 			Input:        userMsg,
+			Temperature:  temperature,
 		}
 
 		body, err := json.Marshal(payload)
