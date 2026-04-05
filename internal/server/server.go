@@ -62,7 +62,8 @@ func (s *Server) register(r *chi.Mux) {
 	r.Get("/projects/{id}/api-config", s.handleGetAPIConfig)
 	r.Put("/projects/{id}/api-config", s.handleSaveAPIConfig)
 
-	// Public scrape - catch-all for dynamic path params
+	// Public scrape - with and without path params
+	r.Get("/api/public/{id}/scrape", s.handlePublicScrape)
 	r.Get("/api/public/{id}/scrape/*", s.handlePublicScrape)
 
 	// LLM Providers
