@@ -296,7 +296,7 @@ func (s *Server) publicScrapeWithExtractor(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to launch browser"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to launch browser: " + err.Error()})
 		return
 	}
 	defer cleanup()

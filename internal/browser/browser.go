@@ -319,13 +319,53 @@ func (m *Manager) NewPageWithCookies(cookiesJSON string) (playwright.Page, func(
 	}
 
 	if cookiesJSON != "" {
-		var rawCookies []playwright.OptionalCookie
+		var rawCookies []map[string]interface{}
 		if err := json.Unmarshal([]byte(cookiesJSON), &rawCookies); err != nil {
 			browserCtx.Close()
 			browser.Close()
 			return nil, nil, fmt.Errorf("invalid cookies JSON: %w", err)
 		}
-		if err := browserCtx.AddCookies(rawCookies); err != nil {
+
+		var cookies []playwright.OptionalCookie
+		for _, raw := range rawCookies {
+			c := playwright.OptionalCookie{}
+			if v, ok := raw["name"].(string); ok {
+				c.Name = v
+			}
+			if v, ok := raw["value"].(string); ok {
+				c.Value = v
+			}
+			if v, ok := raw["domain"].(string); ok && v != "" {
+				c.Domain = &v
+			}
+			if v, ok := raw["path"].(string); ok && v != "" {
+				c.Path = &v
+			}
+			if v, ok := raw["url"].(string); ok && v != "" {
+				c.URL = &v
+			}
+			if v, ok := raw["httpOnly"].(bool); ok {
+				c.HttpOnly = &v
+			}
+			if v, ok := raw["secure"].(bool); ok {
+				c.Secure = &v
+			}
+			if v, ok := raw["sameSite"].(string); ok && v != "" {
+				switch v {
+				case "Strict":
+					c.SameSite = playwright.SameSiteAttributeStrict
+				case "None":
+					c.SameSite = playwright.SameSiteAttributeNone
+				default:
+					c.SameSite = playwright.SameSiteAttributeLax
+				}
+			} else {
+				c.SameSite = playwright.SameSiteAttributeLax
+			}
+			cookies = append(cookies, c)
+		}
+
+		if err := browserCtx.AddCookies(cookies); err != nil {
 			browserCtx.Close()
 			browser.Close()
 			return nil, nil, fmt.Errorf("failed to add cookies: %w", err)
