@@ -742,18 +742,38 @@ function appData() {
             this.batchController = new AbortController();
             const signal = this.batchController.signal;
             
-            const baseUrl = `${window.location.origin}/api/public/${this.currentProjectID}/scrape`;
+            const scrapeUrl = `${window.location.origin}/projects/${this.currentProjectID}/scrape`;
             
             try {
                 for (const combo of this.batchState.combinations) {
                     if (signal.aborted) break;
                     
-                    const urlObj = new URL(baseUrl);
+                    // Build the target URL with path segments and query params
+                    let targetUrl = this.config.baseUrl.trim();
+                    const queryParams = {};
+                    
                     for (const [k, v] of Object.entries(combo)) {
-                        urlObj.searchParams.append(k, v);
+                        if (k.startsWith('path_')) {
+                            targetUrl = targetUrl.replace('{' + k + '}', v);
+                        } else {
+                            queryParams[k] = v;
+                        }
                     }
                     
-                    const res = await fetch(urlObj.toString(), { signal });
+                    if (Object.keys(queryParams).length > 0) {
+                        const urlObj = new URL(targetUrl.startsWith('http') ? targetUrl : 'https://' + targetUrl);
+                        for (const [k, v] of Object.entries(queryParams)) {
+                            urlObj.searchParams.append(k, v);
+                        }
+                        targetUrl = urlObj.toString();
+                    }
+                    
+                    const res = await fetch(scrapeUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: targetUrl }),
+                        signal,
+                    });
                     const result = await res.json();
                     
                     if (res.ok && result.data) {
@@ -838,7 +858,17 @@ function appData() {
         // ── Computed-like ──
         get endpointUrl() {
             if (!this.currentProjectID) return '—';
-            return `${window.location.origin}/api/public/${this.currentProjectID}/scrape`;
+            let url = `${window.location.origin}/api/public/${this.currentProjectID}/scrape`;
+            const pathParams = this.apiConfig.params.filter(p => p.name.startsWith('path_') && p.name.trim());
+            if (pathParams.length > 0) {
+                pathParams.sort((a, b) => {
+                    const aNum = parseInt(a.name.replace('path_', '')) || 0;
+                    const bNum = parseInt(b.name.replace('path_', '')) || 0;
+                    return aNum - bNum;
+                });
+                url += '/' + pathParams.map(p => '{' + p.name + '}').join('/');
+            }
+            return url;
         },
 
         get curlPreview() {
@@ -847,12 +877,37 @@ function appData() {
             let url = `${window.location.origin}/api/public/${this.currentProjectID}/scrape`;
             const validParams = this.apiConfig.params.filter(p => p.name.trim() !== '');
 
-            if (validParams.length > 0) {
-                const parts = validParams.map(p => {
-                    const val = p.default_value || (p.type === 'number' ? '0' : '{value}');
-                    return `${encodeURIComponent(p.name)}=${encodeURIComponent(val)}`;
-                });
-                url += '?' + parts.join('&');
+            // Path params go in the URL path, query params go in the query string
+            const pathParts = [];
+            const queryParams = [];
+
+            validParams.sort((a, b) => {
+                const aPath = a.name.startsWith('path_');
+                const bPath = b.name.startsWith('path_');
+                if (aPath && !bPath) return -1;
+                if (!aPath && bPath) return 1;
+                if (aPath && bPath) {
+                    const aNum = parseInt(a.name.replace('path_', '')) || 0;
+                    const bNum = parseInt(b.name.replace('path_', '')) || 0;
+                    return aNum - bNum;
+                }
+                return 0;
+            });
+
+            for (const p of validParams) {
+                const val = p.default_value || (p.type === 'number' ? '0' : '{value}');
+                if (p.name.startsWith('path_')) {
+                    pathParts.push(val);
+                } else {
+                    queryParams.push(`${encodeURIComponent(p.name)}=${encodeURIComponent(val)}`);
+                }
+            }
+
+            if (pathParts.length > 0) {
+                url += '/' + pathParts.join('/');
+            }
+            if (queryParams.length > 0) {
+                url += '?' + queryParams.join('&');
             }
 
             return `curl "${url}"`;

@@ -208,16 +208,40 @@ func (s *Server) handlePublicScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract path segments from the wildcard route suffix
+	// e.g. /api/public/{id}/scrape/viery_/diary → ["viery_", "diary"]
+	wildcardPath := chi.URLParam(r, "*")
+	log.Printf("[PUBLIC API] Wildcard path captured: %q", wildcardPath)
+
+	// Parse dynamic path segments from the wildcard
+	pathParams := make(map[string]string)
+	if wildcardPath != "" {
+		segments := strings.Split(strings.TrimPrefix(wildcardPath, "/"), "/")
+		for i, seg := range segments {
+			if seg != "" {
+				pathParams[fmt.Sprintf("path_%d", i+1)] = seg
+			}
+		}
+	}
+
+	log.Printf("[PUBLIC API] Base URL: %q, Path params: %+v", project.BaseURL, pathParams)
+
+	// Validate API query params
 	apiParams, err := s.DB.GetAPIParams(id)
 	if err != nil {
 		apiParams = []models.APIParam{}
 	}
 
 	queryValues := r.URL.Query()
-	validatedParams := url.Values{}
+	queryParams := url.Values{}
 	var validationErrors []string
 
 	for _, paramDef := range apiParams {
+		// Skip path params — they come from the URL path, not query string
+		if strings.HasPrefix(paramDef.Name, "path_") {
+			continue
+		}
+
 		val := queryValues.Get(paramDef.Name)
 		if val == "" {
 			if paramDef.Required {
@@ -233,7 +257,7 @@ func (s *Server) handlePublicScrape(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		validatedParams.Set(paramDef.Name, val)
+		queryParams.Set(paramDef.Name, val)
 	}
 
 	if len(validationErrors) > 0 {
@@ -246,22 +270,27 @@ func (s *Server) handlePublicScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build final URL: replace path placeholders, then add query params
 	finalURL := project.BaseURL
 
-	// Resolve path placeholders ({path_1}, etc.) from query params
-	pathParams := make(map[string]string)
-	for k, vals := range validatedParams {
-		pathParams[k] = vals[0]
+	// URL-decode the base_url first (placeholders may be stored as %7Bpath_1%7D)
+	decoded, err := url.QueryUnescape(finalURL)
+	if err == nil {
+		finalURL = decoded
 	}
-	finalURL = resolveURLPlaceholders(finalURL, pathParams)
 
-	if len(validatedParams) > 0 {
+	// Replace path placeholders with values from the wildcard path
+	for key, val := range pathParams {
+		finalURL = strings.ReplaceAll(finalURL, "{"+key+"}", val)
+	}
+
+	if len(queryParams) > 0 {
 		parsed, err := url.Parse(finalURL)
 		if err == nil {
 			existing := parsed.Query()
-			for k, v := range validatedParams {
-				for _, val := range v {
-					existing.Set(k, val)
+			for k, vals := range queryParams {
+				for _, v := range vals {
+					existing.Set(k, v)
 				}
 			}
 			parsed.RawQuery = existing.Encode()
