@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +16,15 @@ import (
 	"webscraper/internal/models"
 	"webscraper/internal/openai"
 )
+
+// resolveURLPlaceholders replaces {key} placeholders in the URL with values from params.
+func resolveURLPlaceholders(rawURL string, params map[string]string) string {
+	result := rawURL
+	for key, val := range params {
+		result = strings.ReplaceAll(result, "{"+key+"}", val)
+	}
+	return result
+}
 
 func (s *Server) getAIClient(providerID string) (*openai.Client, error) {
 	if providerID == "" {
@@ -57,17 +67,29 @@ func (s *Server) handleProjectScrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var req struct {
+		URL    string            `json:"url"`
+		Params map[string]string `json:"params"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	targetURL := project.BaseURL
+	if req.URL != "" {
+		targetURL = req.URL
+	}
+	targetURL = resolveURLPlaceholders(targetURL, req.Params)
+
 	start := time.Now()
 
 	if project.ExtractionConfig != "" && project.ExtractionConfig != "{}" {
-		s.scrapeWithExtractor(w, r, id, project, start)
+		s.scrapeWithExtractor(w, r, id, project, targetURL, start)
 		return
 	}
 
 	http.Error(w, `{"error": "No extraction config found. Please generate an extraction config for this project first."}`, http.StatusBadRequest)
 }
 
-func (s *Server) scrapeWithExtractor(w http.ResponseWriter, r *http.Request, id string, project *models.Project, start time.Time) {
+func (s *Server) scrapeWithExtractor(w http.ResponseWriter, r *http.Request, id string, project *models.Project, targetURL string, start time.Time) {
 	var config models.ExtractionConfig
 	if err := json.Unmarshal([]byte(project.ExtractionConfig), &config); err != nil {
 		http.Error(w, `{"error": "Invalid extraction config in project"}`, http.StatusInternalServerError)
@@ -86,7 +108,7 @@ func (s *Server) scrapeWithExtractor(w http.ResponseWriter, r *http.Request, id 
 	}
 	defer cleanup()
 
-	data, err := extractor.Extract(r.Context(), page, project.BaseURL, config)
+	data, err := extractor.Extract(r.Context(), page, targetURL, config)
 	duration := int(time.Since(start).Milliseconds())
 
 	if err != nil {
@@ -107,7 +129,7 @@ func (s *Server) scrapeWithExtractor(w http.ResponseWriter, r *http.Request, id 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(models.ScrapeResponse{
-		URL:        project.BaseURL,
+		URL:        targetURL,
 		Data:       resultMap,
 		TokensUsed: 0,
 		Duration:   duration,
@@ -225,6 +247,14 @@ func (s *Server) handlePublicScrape(w http.ResponseWriter, r *http.Request) {
 	}
 
 	finalURL := project.BaseURL
+
+	// Resolve path placeholders ({path_1}, etc.) from query params
+	pathParams := make(map[string]string)
+	for k, vals := range validatedParams {
+		pathParams[k] = vals[0]
+	}
+	finalURL = resolveURLPlaceholders(finalURL, pathParams)
+
 	if len(validatedParams) > 0 {
 		parsed, err := url.Parse(finalURL)
 		if err == nil {

@@ -18,7 +18,7 @@ function appData() {
             cookies: '',
         },
 
-        urlParams: [{ key: '', value: '', enabled: true, mode: 'static' }],
+        urlParams: [{ key: '', value: '', enabled: true, mode: 'static', type: 'query' }],
 
         extractionPrompt: '',
         extractionConfig: '',
@@ -211,7 +211,7 @@ function appData() {
         parseUrlToParams() {
             const urlString = this.config.baseUrl.trim();
             if (!urlString) {
-                this.urlParams = [{ key: '', value: '', enabled: true, mode: 'static' }];
+                this.urlParams = [{ key: '', value: '', enabled: true, mode: 'static', type: 'query' }];
                 return;
             }
 
@@ -220,18 +220,32 @@ function appData() {
                 const urlObj = new URL(validUrl);
 
                 const newParams = [];
-                urlObj.searchParams.forEach((value, key) => {
-                    const existing = this.urlParams.find(p => p.key === key);
-                    let mode = existing ? existing.mode : 'static';
 
-                    // If it exists in the API params, mark it dynamic
+                // Parse path segments (skip empty first segment from leading /)
+                const pathParts = urlObj.pathname.split('/').filter(Boolean);
+                pathParts.forEach((segment, i) => {
+                    const existing = this.urlParams.find(p => p.key === `path_${i + 1}` && p.type === 'path');
+                    const mode = existing ? existing.mode : 'static';
+                    newParams.push({
+                        key: `path_${i + 1}`,
+                        value: segment,
+                        enabled: true,
+                        mode,
+                        type: 'path',
+                    });
+                });
+
+                // Parse query parameters
+                urlObj.searchParams.forEach((value, key) => {
+                    const existing = this.urlParams.find(p => p.key === key && p.type === 'query');
+                    let mode = existing ? existing.mode : 'static';
                     if (this.apiConfig.params.some(ap => ap.name === key)) {
                         mode = 'dynamic';
                     }
-                    newParams.push({ key, value, enabled: true, mode });
+                    newParams.push({ key, value, enabled: true, mode, type: 'query' });
                 });
 
-                newParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+                newParams.push({ key: '', value: '', enabled: true, mode: 'static', type: 'query' });
                 this.urlParams = newParams;
             } catch (e) {
                 // Invalid URL – do nothing
@@ -243,20 +257,20 @@ function appData() {
 
             // Auto-add row if typing in the last row
             if (index === this.urlParams.length - 1 && (this.urlParams[index].key || this.urlParams[index].value)) {
-                this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+                this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static', type: 'query' });
             }
 
             this.buildUrlFromParams();
         },
 
         addUrlParam() {
-            this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+            this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static', type: 'query' });
         },
 
         removeUrlParam(index) {
             this.urlParams.splice(index, 1);
             if (this.urlParams.length === 0) {
-                this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static' });
+                this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static', type: 'query' });
             }
             this.buildUrlFromParams();
         },
@@ -268,10 +282,22 @@ function appData() {
             try {
                 const validUrl = urlString.startsWith('http') ? urlString : `https://${urlString}`;
                 const urlObj = new URL(validUrl);
-                urlObj.search = '';
 
+                // Rebuild path from path params — always use actual values
+                const pathParams = this.urlParams.filter(p => p.type === 'path' && p.enabled && p.key);
+                pathParams.sort((a, b) => {
+                    const aNum = parseInt(a.key.replace('path_', '')) || 0;
+                    const bNum = parseInt(b.key.replace('path_', '')) || 0;
+                    return aNum - bNum;
+                });
+
+                const pathSegments = pathParams.map(p => p.value).filter(Boolean);
+                urlObj.pathname = '/' + pathSegments.join('/');
+
+                // Rebuild query string from query params
+                urlObj.search = '';
                 this.urlParams.forEach(p => {
-                    if (p.enabled && p.key) {
+                    if (p.type === 'query' && p.enabled && p.key) {
                         urlObj.searchParams.append(p.key, p.value);
                     }
                 });
@@ -298,13 +324,31 @@ function appData() {
                 }
             }
 
+            // Build the save URL with placeholders for dynamic path params
+            let saveUrl = this.config.baseUrl.trim();
+            try {
+                const urlObj = new URL(saveUrl.startsWith('http') ? saveUrl : 'https://' + saveUrl);
+                const pathParams = this.urlParams.filter(p => p.type === 'path' && p.enabled && p.key);
+                pathParams.sort((a, b) => {
+                    const aNum = parseInt(a.key.replace('path_', '')) || 0;
+                    const bNum = parseInt(b.key.replace('path_', '')) || 0;
+                    return aNum - bNum;
+                });
+                const segments = pathParams.map(p => {
+                    if (p.mode === 'dynamic') return '{' + p.key + '}';
+                    return p.value;
+                }).filter(Boolean);
+                urlObj.pathname = '/' + segments.join('/');
+                saveUrl = urlObj.toString();
+            } catch (e) {}
+
             try {
                 const res = await fetch(`/projects/${this.currentProjectID}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         name: this.currentProject.name,
-                        base_url: this.config.baseUrl.trim(),
+                        base_url: saveUrl,
                         schema: this.config.schema || '{}',
                         prompt: this.extractionPrompt.trim(),
                         provider: this.config.provider,
@@ -593,6 +637,12 @@ function appData() {
             this.updateBatchCombinations();
         },
 
+        hasBatchParams() {
+            const hasApiParams = this.apiConfig.enabled && this.apiConfig.params.some(p => !!p.name);
+            const hasDynamicPath = this.urlParams.some(p => p.type === 'path' && p.mode === 'dynamic');
+            return hasApiParams || hasDynamicPath;
+        },
+
         // ── Batch Iteration Logic ──
         syncBatchConfig() {
             this.apiConfig.params.forEach(p => {
@@ -603,14 +653,20 @@ function appData() {
                         : { list: '' };
                 }
             });
+            this.urlParams.filter(p => p.type === 'path' && p.mode === 'dynamic').forEach(p => {
+                if (!this.batchConfig[p.key]) {
+                    this.batchConfig[p.key] = { list: '' };
+                }
+            });
         },
 
         updateBatchCombinations() {
             this.syncBatchConfig();
-            const params = this.apiConfig.params.filter(p => !!p.name);
             
             const variations = {};
-            for (const p of params) {
+
+            // API query params
+            for (const p of this.apiConfig.params.filter(p => !!p.name)) {
                 variations[p.name] = [];
                 const config = this.batchConfig[p.name];
                 if (!config) continue;
@@ -626,12 +682,25 @@ function appData() {
                     }
                 } else {
                     if (config.list && config.list.trim()) {
-                        const parts = config.list.split(',').map(s => s.trim()).filter(s => s);
-                        variations[p.name] = parts;
+                        variations[p.name] = config.list.split(',').map(s => s.trim()).filter(s => s);
                     }
                 }
                 
                 if (variations[p.name].length === 0) {
+                    this.batchState.combinations = [];
+                    this.batchState.total = 0;
+                    return;
+                }
+            }
+
+            // Dynamic path params
+            for (const p of this.urlParams.filter(p => p.type === 'path' && p.mode === 'dynamic')) {
+                variations[p.key] = [];
+                const config = this.batchConfig[p.key];
+                if (config && config.list && config.list.trim()) {
+                    variations[p.key] = config.list.split(',').map(s => s.trim()).filter(s => s);
+                }
+                if (variations[p.key].length === 0) {
                     this.batchState.combinations = [];
                     this.batchState.total = 0;
                     return;

@@ -82,20 +82,39 @@
                                             <span x-text="showParams ? '▲' : '▼'"></span>
                                         </div>
                                         <div class="params-container" x-show="showParams" x-transition>
-                                            <div class="param-group">
-                                                <h4>Query Parameters</h4>
-                                                <template x-for="(p, i) in urlParams" :key="i">
+                                            <!-- Path Parameters -->
+                                            <div class="param-group" x-show="urlParams.some(p => p.type === 'path')">
+                                                <h4>Path Parameters</h4>
+                                                <template x-for="(p, i) in urlParams.filter(p => p.type === 'path')" :key="'path-' + p.key">
                                                     <div class="param-row">
                                                         <input type="checkbox" :checked="p.enabled" @change="p.enabled = $event.target.checked; buildUrlFromParams()">
-                                                        <input type="text" class="input-field param-input" placeholder="Key" :value="p.key" @input="updateUrlParam(i, 'key', $event.target.value)">
-                                                        <input type="text" class="input-field param-input" placeholder="Value" :value="p.value" @input="updateUrlParam(i, 'value', $event.target.value)">
+                                                        <input type="text" class="input-field param-input" placeholder="Key" :value="p.key" @input="updateUrlParam(urlParams.indexOf(p), 'key', $event.target.value)" readonly style="background: var(--bg-elevated);">
+                                                        <input type="text" class="input-field param-input" placeholder="Value" :value="p.value" @input="updateUrlParam(urlParams.indexOf(p), 'value', $event.target.value)">
+                                                        <button type="button" class="param-mode-pill"
+                                                                :class="p.mode === 'dynamic' ? 'mode-dynamic' : 'mode-static'"
+                                                                @click="p.mode = p.mode === 'static' ? 'dynamic' : 'static'"
+                                                                :title="p.mode === 'static' ? 'Static: fixed path segment' : 'Dynamic: configurable via public API'"
+                                                                x-text="p.mode === 'static' ? '🔒 Static' : '🔓 Dynamic'">
+                                                        </button>
+                                                    </div>
+                                                </template>
+                                            </div>
+
+                                            <!-- Query Parameters -->
+                                            <div class="param-group">
+                                                <h4>Query Parameters</h4>
+                                                <template x-for="(p, i) in urlParams.filter(p => p.type === 'query')" :key="'query-' + i">
+                                                    <div class="param-row">
+                                                        <input type="checkbox" :checked="p.enabled" @change="p.enabled = $event.target.checked; buildUrlFromParams()">
+                                                        <input type="text" class="input-field param-input" placeholder="Key" :value="p.key" @input="updateUrlParam(urlParams.indexOf(p), 'key', $event.target.value)">
+                                                        <input type="text" class="input-field param-input" placeholder="Value" :value="p.value" @input="updateUrlParam(urlParams.indexOf(p), 'value', $event.target.value)">
                                                         <button type="button" class="param-mode-pill"
                                                                 :class="p.mode === 'dynamic' ? 'mode-dynamic' : 'mode-static'"
                                                                 @click="p.mode = p.mode === 'static' ? 'dynamic' : 'static'"
                                                                 :title="p.mode === 'static' ? 'Static: included in every request' : 'Dynamic: configurable via public API'"
                                                                 x-text="p.mode === 'static' ? '🔒 Static' : '🔓 Dynamic'">
                                                         </button>
-                                                        <button type="button" class="btn-danger-icon" @click="removeUrlParam(i)" title="Delete">&times;</button>
+                                                        <button type="button" class="btn-danger-icon" @click="removeUrlParam(urlParams.indexOf(p))" title="Delete">&times;</button>
                                                     </div>
                                                 </template>
                                                 <button type="button" class="btn-secondary btn-xs" @click="addUrlParam()">+ Add Query Param</button>
@@ -241,11 +260,24 @@
                                 Run multiple scrapes automatically by defining ranges or lists for your dynamic query parameters.
                             </p>
 
-                            <div x-show="!apiConfig.enabled || apiConfig.params.filter(p => !!p.name).length === 0" class="empty-state" style="padding: 20px;">
-                                <p>You need to enable the Public API and define parameters in the Interface tab first.</p>
+                            <div x-show="!hasBatchParams()" class="empty-state" style="padding: 20px;">
+                                <p>You need to enable the Public API and define parameters in the Interface tab, or set path parameters to dynamic in the Configuration tab first.</p>
                             </div>
 
-                            <div x-show="apiConfig.enabled && apiConfig.params.filter(p => !!p.name).length > 0">
+                            <div x-show="hasBatchParams()">
+                                <!-- Dynamic Path Parameters -->
+                                <template x-for="(p, i) in urlParams.filter(p => p.type === 'path' && p.mode === 'dynamic')" :key="'batch-path-' + p.key">
+                                    <div class="form-group" style="padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); margin-bottom: 12px;">
+                                        <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">
+                                            🔗 Path: <span x-text="p.key"></span>
+                                        </div>
+                                        <div>
+                                            <input type="text" class="input-field" placeholder="Comma-separated values (e.g. user1, user2, user3)" x-model="batchConfig[p.key].list" @input="updateBatchCombinations()">
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Query Parameters -->
                                 <template x-for="(p, i) in apiConfig.params.filter(p => !!p.name)" :key="i">
                                     <div class="form-group" style="padding: 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); margin-bottom: 12px;">
                                         <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);" x-text="p.name + ' (' + p.type + ')'"></div>
