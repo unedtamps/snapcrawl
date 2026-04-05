@@ -254,12 +254,6 @@ function appData() {
 
         updateUrlParam(index, field, value) {
             this.urlParams[index][field] = value;
-
-            // Auto-add row if typing in the last row
-            if (index === this.urlParams.length - 1 && (this.urlParams[index].key || this.urlParams[index].value)) {
-                this.urlParams.push({ key: '', value: '', enabled: true, mode: 'static', type: 'query' });
-            }
-
             this.buildUrlFromParams();
         },
 
@@ -360,47 +354,51 @@ function appData() {
                 if (res.ok) {
                     this.showToast('Configuration saved!', 'success');
 
-                    // Auto-sync dynamic params: merge into existing API params without overwriting user changes
-                    const dynamicParams = this.urlParams
-                        .filter(p => p.key.trim() && p.enabled && p.mode === 'dynamic');
+                    // Sync dynamic params to API config, remove params that are no longer dynamic
+                    const dynamicKeys = new Set(
+                        this.urlParams
+                            .filter(p => p.key.trim() && p.enabled && p.mode === 'dynamic')
+                            .map(p => p.key)
+                    );
 
-                    if (dynamicParams.length > 0) {
-                        // Build a map of existing API params by name to preserve user edits (type, required, description)
-                        const existingByName = {};
-                        for (const ep of this.apiConfig.params) {
-                            if (ep.name) existingByName[ep.name] = ep;
-                        }
+                    // Remove API params that are no longer dynamic
+                    const cleanedParams = this.apiConfig.params.filter(p => !p.name || dynamicKeys.has(p.name));
 
-                        const mergedParams = dynamicParams.map(p => {
-                            const existing = existingByName[p.key];
-                            if (existing) {
-                                // Preserve user-edited fields, only update default_value from URL
-                                return {
-                                    ...existing,
-                                    default_value: p.value,
-                                };
-                            }
-                            // New param: auto-detect type from value
-                            const detectedType = (p.value !== '' && !isNaN(Number(p.value))) ? 'number' : 'string';
-                            return {
-                                name: p.key,
-                                type: detectedType,
-                                required: false,
-                                default_value: p.value,
-                                description: '',
-                            };
-                        });
-
-                        await fetch(`/projects/${this.currentProjectID}/api-config`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                enabled: this.apiConfig.enabled,
-                                params: mergedParams,
-                            }),
-                        });
-                        this.showToast(`${mergedParams.length} dynamic param(s) synced to Interface`, 'info');
+                    // Add/update dynamic params
+                    const existingByName = {};
+                    for (const ep of cleanedParams) {
+                        if (ep.name) existingByName[ep.name] = ep;
                     }
+
+                    const dynamicParams = this.urlParams.filter(p => p.key.trim() && p.enabled && p.mode === 'dynamic');
+                    const mergedParams = dynamicParams.map(p => {
+                        const existing = existingByName[p.key];
+                        if (existing) {
+                            return { ...existing, default_value: p.value };
+                        }
+                        const detectedType = (p.value !== '' && !isNaN(Number(p.value))) ? 'number' : 'string';
+                        return {
+                            name: p.key,
+                            type: detectedType,
+                            required: false,
+                            default_value: p.value,
+                            description: '',
+                        };
+                    });
+
+                    // Combine: cleaned params (minus replaced dynamic ones) + merged dynamic ones
+                    const staticParams = cleanedParams.filter(p => !p.name || !dynamicKeys.has(p.name));
+                    const finalParams = [...staticParams, ...mergedParams];
+
+                    await fetch(`/projects/${this.currentProjectID}/api-config`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            enabled: this.apiConfig.enabled,
+                            params: finalParams,
+                        }),
+                    });
+                    this.showToast(`${dynamicParams.length} dynamic param(s) synced to Interface`, 'info');
 
                     this.loadAPIConfig();
                 } else {

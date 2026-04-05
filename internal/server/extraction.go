@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"time"
 
 	"webscraper/internal/extractor"
 	"webscraper/internal/models"
@@ -105,7 +106,9 @@ func (s *Server) handleTestExtractionConfig(w http.ResponseWriter, r *http.Reque
 	}
 	defer cleanup()
 
+	start := time.Now()
 	data, err := extractor.Extract(r.Context(), page, req.URL, req.Config)
+	duration := int(time.Since(start).Milliseconds())
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "Extraction failed: %s"}`, err.Error()), http.StatusInternalServerError)
 		return
@@ -113,7 +116,8 @@ func (s *Server) handleTestExtractionConfig(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"data":  data,
-		"count": len(data),
+		"data":        data,
+		"count":       len(data),
+		"duration_ms": duration,
 	})
 }
