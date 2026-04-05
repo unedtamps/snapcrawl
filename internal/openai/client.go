@@ -22,21 +22,15 @@ type Client struct {
 	model      string
 	baseURL    string
 	maxRetries int
+	isLocal    bool
 }
 
 // Config holds OpenAI configuration
 type Config struct {
-	APIKey  string
-	BaseURL string
-	Model   string
-}
-
-// DefaultConfig returns default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		BaseURL: "https://api.deepseek.com/v1",
-		Model:   "deepseek-chat",
-	}
+	APIKey       string
+	BaseURL      string
+	Model        string
+	ProviderType string // "cloud" or "local"
 }
 
 // New creates a new OpenAI client
@@ -50,12 +44,26 @@ func New(cfg *Config) (*Client, error) {
 
 	client := openai.NewClientWithConfig(openaiCfg)
 
+	providerType := cfg.ProviderType
+	if providerType == "" {
+		providerType = "cloud"
+	}
+
 	return &Client{
 		client:     client,
 		model:      cfg.Model,
 		baseURL:    cfg.BaseURL,
 		maxRetries: 3,
+		isLocal:    providerType == "local",
 	}, nil
+}
+
+// DefaultConfig returns default configuration
+func DefaultConfig() *Config {
+	return &Config{
+		BaseURL: "https://api.deepseek.com/v1",
+		Model:   "deepseek-chat",
+	}
 }
 
 // MustNew creates a new client or panics on error
@@ -108,7 +116,7 @@ func (c *Client) ExtractData(ctx context.Context, req *ExtractionRequest) (*Extr
 	start := time.Now()
 
 	// Use custom format if targeting local server
-	if strings.Contains(c.baseURL, "127.0.0.1") || strings.Contains(c.baseURL, "localhost") {
+	if c.isLocal {
 		return c.extractDataLocal(ctx, req, start)
 	}
 
@@ -462,7 +470,7 @@ Example output for "I want product names and prices":
 // GenerateSchema uses AI to generate a JSON extraction schema from page content and user description
 func (c *Client) GenerateSchema(ctx context.Context, url, content, userPrompt string) (*SchemaResult, error) {
 	// Use local format if targeting local server
-	if strings.Contains(c.baseURL, "127.0.0.1") || strings.Contains(c.baseURL, "localhost") {
+	if c.isLocal {
 		return c.generateSchemaLocal(ctx, url, content, userPrompt)
 	}
 
@@ -647,7 +655,7 @@ Example for single page:
 
 // GenerateExtractionConfig uses AI to generate a selector-based extraction config from HTML
 func (c *Client) GenerateExtractionConfig(ctx context.Context, url, html, userPrompt string, temperature float64, maxTokens int) (*ExtractionConfigResult, error) {
-	if strings.Contains(c.baseURL, "127.0.0.1") || strings.Contains(c.baseURL, "localhost") {
+	if c.isLocal {
 		return c.generateExtractionConfigLocal(ctx, url, html, userPrompt, temperature, maxTokens)
 	}
 

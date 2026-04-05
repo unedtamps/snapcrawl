@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS llm_providers (
     api_key TEXT NOT NULL,
     base_url TEXT NOT NULL,
     model_name TEXT NOT NULL,
+    provider_type TEXT DEFAULT 'cloud',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 `
@@ -95,6 +96,9 @@ func (db *DB) migrate() error {
 
 	// Add extraction_config column to existing databases (idempotent)
 	db.Exec("ALTER TABLE projects ADD COLUMN extraction_config TEXT DEFAULT ''")
+
+	// Add provider_type column to existing databases (idempotent)
+	db.Exec("ALTER TABLE llm_providers ADD COLUMN provider_type TEXT DEFAULT 'cloud'")
 
 	return nil
 }
@@ -289,8 +293,8 @@ func (db *DB) GetAPIParams(projectID string) ([]models.APIParam, error) {
 // ── LLM Providers ──
 
 func (db *DB) CreateLLMProvider(p *models.LLMProvider) error {
-	query := `INSERT INTO llm_providers (name, api_key, base_url, model_name) VALUES (?, ?, ?, ?)`
-	res, err := db.Exec(query, p.Name, p.APIKey, p.BaseURL, p.ModelName)
+	query := `INSERT INTO llm_providers (name, api_key, base_url, model_name, provider_type) VALUES (?, ?, ?, ?, ?)`
+	res, err := db.Exec(query, p.Name, p.APIKey, p.BaseURL, p.ModelName, p.ProviderType)
 	if err != nil {
 		return err
 	}
@@ -302,7 +306,7 @@ func (db *DB) CreateLLMProvider(p *models.LLMProvider) error {
 }
 
 func (db *DB) GetLLMProviders() ([]models.LLMProvider, error) {
-	query := `SELECT id, name, base_url, model_name, created_at FROM llm_providers ORDER BY created_at DESC`
+	query := `SELECT id, name, base_url, model_name, provider_type, created_at FROM llm_providers ORDER BY created_at DESC`
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
@@ -312,20 +316,20 @@ func (db *DB) GetLLMProviders() ([]models.LLMProvider, error) {
 	providers := make([]models.LLMProvider, 0)
 	for rows.Next() {
 		var p models.LLMProvider
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.ModelName, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.ModelName, &p.ProviderType, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		providers = append(providers, p)
 	}
-	return providers, nil
+	return providers, rows.Err()
 }
 
 func (db *DB) GetLLMProviderByID(id string) (*models.LLMProvider, error) {
-	query := `SELECT id, name, api_key, base_url, model_name, created_at FROM llm_providers WHERE id = ?`
+	query := `SELECT id, name, api_key, base_url, model_name, provider_type, created_at FROM llm_providers WHERE id = ?`
 	row := db.QueryRow(query, id)
 
 	var p models.LLMProvider
-	err := row.Scan(&p.ID, &p.Name, &p.APIKey, &p.BaseURL, &p.ModelName, &p.CreatedAt)
+	err := row.Scan(&p.ID, &p.Name, &p.APIKey, &p.BaseURL, &p.ModelName, &p.ProviderType, &p.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("provider not found")

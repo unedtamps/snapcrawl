@@ -35,9 +35,10 @@ func (s *Server) getAIClient(providerID string) (*openai.Client, error) {
 		return nil, fmt.Errorf("failed to get provider details: %w", err)
 	}
 	cfg := &openai.Config{
-		APIKey:  p.APIKey,
-		BaseURL: p.BaseURL,
-		Model:   p.ModelName,
+		APIKey:       p.APIKey,
+		BaseURL:      p.BaseURL,
+		Model:        p.ModelName,
+		ProviderType: p.ProviderType,
 	}
 	return openai.New(cfg)
 }

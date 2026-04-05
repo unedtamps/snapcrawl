@@ -38,7 +38,7 @@ function appData() {
         // ── Settings & LLM Providers ──
         showSettingsModal: false,
         llmProviders: [],
-        newProvider: { name: '', base_url: '', model_name: '', api_key: '' },
+        newProvider: { name: '', base_url: '', model_name: '', api_key: '', provider_type: 'cloud' },
 
         modal: { show: false, content: '' },
         toasts: [],
@@ -90,7 +90,7 @@ function appData() {
                 });
                 if (res.ok) {
                     this.showToast('Provider added', 'success');
-                    this.newProvider = { name: '', base_url: '', model_name: '', api_key: '' };
+                    this.newProvider = { name: '', base_url: '', model_name: '', api_key: '', provider_type: 'cloud' };
                     await this.loadLLMProviders();
                 } else {
                     const err = await res.json();

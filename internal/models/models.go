@@ -75,12 +75,13 @@ type DataView struct {
 
 // LLMProvider definitions for user-configured AI models
 type LLMProvider struct {
-	ID        int       `json:"id" db:"id"`
-	Name      string    `json:"name" db:"name"`
-	APIKey    string    `json:"api_key,omitempty" db:"api_key"`
-	BaseURL   string    `json:"base_url" db:"base_url"`
-	ModelName string    `json:"model_name" db:"model_name"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	ID           int       `json:"id" db:"id"`
+	Name         string    `json:"name" db:"name"`
+	APIKey       string    `json:"api_key,omitempty" db:"api_key"`
+	BaseURL      string    `json:"base_url" db:"base_url"`
+	ModelName    string    `json:"model_name" db:"model_name"`
+	ProviderType string    `json:"provider_type" db:"provider_type"` // "cloud" or "local"
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 }
 
 // ExtractionField defines a single field to extract from a page

@@ -76,6 +76,10 @@ func (s *Server) handleCreateProvider(w http.ResponseWriter, r *http.Request) {
 	req.BaseURL = strings.TrimSpace(req.BaseURL)
 	req.ModelName = strings.TrimSpace(req.ModelName)
 
+	if req.ProviderType == "" {
+		req.ProviderType = "cloud"
+	}
+
 	if req.Name == "" || req.APIKey == "" || req.BaseURL == "" || req.ModelName == "" {
 		http.Error(w, `{"error": "All fields are required"}`, http.StatusBadRequest)
 		return
