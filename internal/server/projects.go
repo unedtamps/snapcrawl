@@ -27,7 +27,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := uuid.New().String()
-	if err := s.DB.CreateProject(id, req.Name, "", "{}", "", "deepseek", 1000); err != nil {
+	if err := s.DB.CreateProject(id, req.Name, "", "{}", "", "deepseek"); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			http.Error(w, `{"error": "Project name already exists"}`, http.StatusConflict)
 			return
@@ -79,12 +79,13 @@ func (s *Server) handleUpdateProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.DB.UpdateProject(id, req.Name, req.BaseURL, req.Schema, req.Prompt, req.Provider, req.DelayMs); err != nil {
+	if err := s.DB.UpdateProject(id, req.Name, req.BaseURL, req.Schema, req.Prompt, req.Provider); err != nil {
 		http.Error(w, `{"error": "Failed to update project"}`, http.StatusInternalServerError)
 		return
 	}
 
 	s.DB.UpdateExtractionConfig(id, req.ExtractionConfig)
+	s.DB.UpdateCookies(id, req.Cookies)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})

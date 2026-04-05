@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -290,9 +291,52 @@ func (m *Manager) FetchDOMTree(targetURL string) (string, error) {
 // NewPage creates a fresh browser + page and returns them with a cleanup function.
 // Callers should defer cleanup() to close browser and context.
 func (m *Manager) NewPage() (playwright.Page, func(), error) {
-	browser, browserCtx, page, err := m.launchBrowser()
+	return m.NewPageWithCookies("")
+}
+
+// NewPageWithCookies creates a fresh browser + page with cookies set.
+// cookiesJSON should be a JSON array of cookie objects:
+// [{"name":"session","value":"abc123","domain":"example.com","path":"/"}]
+func (m *Manager) NewPageWithCookies(cookiesJSON string) (playwright.Page, func(), error) {
+	browser, err := m.pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(true),
+		Args: []string{
+			"--disable-http2", "--disable-quic", "--no-sandbox",
+			"--disable-setuid-sandbox", "--disable-dev-shm-usage",
+		},
+	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to launch browser: %w", err)
+	}
+
+	browserCtx, err := browser.NewContext(playwright.BrowserNewContextOptions{
+		UserAgent:         playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		IgnoreHttpsErrors: playwright.Bool(true),
+	})
+	if err != nil {
+		browser.Close()
+		return nil, nil, fmt.Errorf("failed to create context: %w", err)
+	}
+
+	if cookiesJSON != "" {
+		var rawCookies []playwright.OptionalCookie
+		if err := json.Unmarshal([]byte(cookiesJSON), &rawCookies); err != nil {
+			browserCtx.Close()
+			browser.Close()
+			return nil, nil, fmt.Errorf("invalid cookies JSON: %w", err)
+		}
+		if err := browserCtx.AddCookies(rawCookies); err != nil {
+			browserCtx.Close()
+			browser.Close()
+			return nil, nil, fmt.Errorf("failed to add cookies: %w", err)
+		}
+	}
+
+	page, err := browserCtx.NewPage()
+	if err != nil {
+		browserCtx.Close()
+		browser.Close()
+		return nil, nil, fmt.Errorf("failed to create page: %w", err)
 	}
 
 	cleanup := func() {

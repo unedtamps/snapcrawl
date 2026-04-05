@@ -15,7 +15,7 @@ function appData() {
             schema: '',
             prompt: '',
             provider: 'deepseek',
-            delay: 1000,
+            cookies: '',
         },
 
         urlParams: [{ key: '', value: '', enabled: true, mode: 'static' }],
@@ -45,7 +45,6 @@ function appData() {
         toastCounter: 0,
 
         latestResult: null,
-        testController: null,
 
         // ── Batch Iteration State ──
         batchConfig: {},
@@ -174,7 +173,7 @@ function appData() {
             this.config.schema = this.currentProject.schema || '';
             this.config.prompt = this.currentProject.prompt || '';
             this.config.provider = this.currentProject.provider || 'deepseek';
-            this.config.delay = this.currentProject.delay_ms || 1000;
+            this.config.cookies = this.currentProject.cookies || '';
 
             this.extractionPrompt = this.currentProject.prompt || '';
             this.extractionConfig = this.currentProject.extraction_config || '';
@@ -309,8 +308,8 @@ function appData() {
                         schema: this.config.schema || '{}',
                         prompt: this.extractionPrompt.trim(),
                         provider: this.config.provider,
-                        delay_ms: this.config.delay,
                         extraction_config: this.extractionConfig.trim(),
+                        cookies: this.config.cookies.trim(),
                     }),
                 });
 
@@ -367,71 +366,6 @@ function appData() {
             } catch (e) {
                 this.showToast('Error: ' + e.message, 'error');
             }
-        },
-
-        // ── Test Scrape ──
-        async testScrape() {
-            if (!this.currentProjectID || !this.currentProject) return;
-
-            const baseUrl = this.config.baseUrl.trim();
-            if (!baseUrl) {
-                this.showToast('Please enter a Base URL', 'error');
-                return;
-            }
-
-            if (this.testController) this.testController.abort();
-            this.testController = new AbortController();
-            const signal = this.testController.signal;
-
-            this.showModal(`
-                <div style="text-align:center; padding:24px;">
-                    <div style="color:var(--text-muted); margin-bottom: 16px;">Testing... please wait</div>
-                    <button class="btn-secondary" onclick="document.querySelector('[x-data]').__x.$data.cancelTest()">Cancel</button>
-                </div>
-            `);
-
-            try {
-                const schema = JSON.parse(this.config.schema);
-                const res = await fetch('/api/v2/ai/scrape', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        url: baseUrl,
-                        schema: schema,
-                        prompt: this.config.prompt.trim(),
-                        provider: this.config.provider,
-                    }),
-                    signal,
-                });
-
-                const result = await res.json();
-
-                if (res.ok) {
-                    this.showModal(`
-                        <div class="result-preview">
-                            <p><strong>URL:</strong> ${this.escapeHtml(result.url)}</p>
-                            <p><strong>Tokens:</strong> ${result.tokens_used}</p>
-                            <p><strong>Duration:</strong> ${result.duration_ms}ms</p>
-                            <h4>Extracted Data:</h4>
-                            <pre>${this.escapeHtml(JSON.stringify(result.data, null, 2))}</pre>
-                        </div>
-                    `);
-                } else {
-                    this.showModal(`<div class="error">Error: ${this.escapeHtml(result.error || 'Unknown error')}</div>`);
-                }
-            } catch (e) {
-                if (e.name === 'AbortError') {
-                    this.showModal('<div style="text-align:center; padding:24px; color:var(--text-muted);">Test canceled.</div>');
-                } else {
-                    this.showModal(`<div class="error">Error: ${this.escapeHtml(e.message)}</div>`);
-                }
-            } finally {
-                this.testController = null;
-            }
-        },
-
-        cancelTest() {
-            if (this.testController) this.testController.abort();
         },
 
         // ── Results ──

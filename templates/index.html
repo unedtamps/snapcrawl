@@ -156,13 +156,13 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label>Delay (ms)</label>
-                                    <input type="number" x-model.number="config.delay" class="input-field" min="0">
+                                    <label>🍪 Cookies (JSON)</label>
+                                    <textarea x-model="config.cookies" class="textarea" rows="4" placeholder='[{"name":"session","value":"abc123","domain":"example.com","path":"/"}]'></textarea>
+                                    <small>JSON array of cookies for authenticated page access</small>
                                 </div>
 
                                 <div class="form-actions">
                                     <button type="submit" class="btn-primary">Save</button>
-                                    <button type="button" @click="testScrape()" class="btn-secondary">Test</button>
                                 </div>
                             </form>
                         </div>

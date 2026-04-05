@@ -20,9 +20,9 @@ CREATE TABLE IF NOT EXISTS projects (
     schema_json TEXT NOT NULL,
     prompt TEXT,
     provider TEXT DEFAULT 'deepseek',
-    delay_ms INTEGER DEFAULT 1000,
     api_enabled INTEGER DEFAULT 0,
     extraction_config TEXT DEFAULT '',
+    cookies TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -100,16 +100,19 @@ func (db *DB) migrate() error {
 	// Add provider_type column to existing databases (idempotent)
 	db.Exec("ALTER TABLE llm_providers ADD COLUMN provider_type TEXT DEFAULT 'cloud'")
 
+	// Add cookies column to existing databases (idempotent)
+	db.Exec("ALTER TABLE projects ADD COLUMN cookies TEXT DEFAULT ''")
+
 	return nil
 }
 
 // ── Projects ──
 
 // CreateProject creates a new project
-func (db *DB) CreateProject(id, name, baseURL, schema, prompt, provider string, delayMs int) error {
+func (db *DB) CreateProject(id, name, baseURL, schema, prompt, provider string) error {
 	_, err := db.Exec(
-		"INSERT INTO projects (id, name, base_url, schema_json, prompt, provider, delay_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		id, name, baseURL, schema, prompt, provider, delayMs, time.Now(), time.Now(),
+		"INSERT INTO projects (id, name, base_url, schema_json, prompt, provider, cookies, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)",
+		id, name, baseURL, schema, prompt, provider, time.Now(), time.Now(),
 	)
 	return err
 }
@@ -118,9 +121,9 @@ func (db *DB) CreateProject(id, name, baseURL, schema, prompt, provider string, 
 func (db *DB) GetProject(id string) (*models.Project, error) {
 	var p models.Project
 	err := db.QueryRow(
-		"SELECT id, name, base_url, schema_json, prompt, provider, delay_ms, api_enabled, extraction_config, created_at, updated_at FROM projects WHERE id = ?",
+		"SELECT id, name, base_url, schema_json, prompt, provider, api_enabled, extraction_config, cookies, created_at, updated_at FROM projects WHERE id = ?",
 		id,
-	).Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.DelayMs, &p.APIEnabled, &p.ExtractionConfig, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.APIEnabled, &p.ExtractionConfig, &p.Cookies, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +132,7 @@ func (db *DB) GetProject(id string) (*models.Project, error) {
 
 // GetAllProjects retrieves all projects
 func (db *DB) GetAllProjects() ([]models.Project, error) {
-	rows, err := db.Query("SELECT id, name, base_url, schema_json, prompt, provider, delay_ms, api_enabled, extraction_config, created_at, updated_at FROM projects ORDER BY created_at DESC")
+	rows, err := db.Query("SELECT id, name, base_url, schema_json, prompt, provider, api_enabled, extraction_config, cookies, created_at, updated_at FROM projects ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +141,7 @@ func (db *DB) GetAllProjects() ([]models.Project, error) {
 	var projects []models.Project
 	for rows.Next() {
 		var p models.Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.DelayMs, &p.APIEnabled, &p.ExtractionConfig, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.BaseURL, &p.Schema, &p.Prompt, &p.Provider, &p.APIEnabled, &p.ExtractionConfig, &p.Cookies, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		projects = append(projects, p)
@@ -147,10 +150,19 @@ func (db *DB) GetAllProjects() ([]models.Project, error) {
 }
 
 // UpdateProject updates an existing project
-func (db *DB) UpdateProject(id, name, baseURL, schema, prompt, provider string, delayMs int) error {
+func (db *DB) UpdateProject(id, name, baseURL, schema, prompt, provider string) error {
 	_, err := db.Exec(
-		"UPDATE projects SET name = ?, base_url = ?, schema_json = ?, prompt = ?, provider = ?, delay_ms = ?, updated_at = ? WHERE id = ?",
-		name, baseURL, schema, prompt, provider, delayMs, time.Now(), id,
+		"UPDATE projects SET name = ?, base_url = ?, schema_json = ?, prompt = ?, provider = ?, updated_at = ? WHERE id = ?",
+		name, baseURL, schema, prompt, provider, time.Now(), id,
+	)
+	return err
+}
+
+// UpdateCookies updates only the cookies for a project
+func (db *DB) UpdateCookies(projectID, cookies string) error {
+	_, err := db.Exec(
+		"UPDATE projects SET cookies = ?, updated_at = ? WHERE id = ?",
+		cookies, time.Now(), projectID,
 	)
 	return err
 }

@@ -13,9 +13,9 @@ type Project struct {
 	Schema           string    `json:"schema" db:"schema_json"`
 	Prompt           string    `json:"prompt" db:"prompt"`
 	Provider         string    `json:"provider" db:"provider"`
-	DelayMs          int       `json:"delay_ms" db:"delay_ms"`
 	APIEnabled       bool      `json:"api_enabled" db:"api_enabled"`
 	ExtractionConfig string    `json:"extraction_config" db:"extraction_config"`
+	Cookies          string    `json:"cookies" db:"cookies"`
 	CreatedAt        time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
 }

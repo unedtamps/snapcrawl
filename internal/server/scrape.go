@@ -79,7 +79,7 @@ func (s *Server) scrapeWithExtractor(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 
-	page, cleanup, err := s.Browser.NewPage()
+	page, cleanup, err := s.Browser.NewPageWithCookies(project.Cookies)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error": "Failed to launch browser: %s"}`, err.Error()), http.StatusInternalServerError)
 		return
@@ -262,7 +262,7 @@ func (s *Server) publicScrapeWithExtractor(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	page, cleanup, err := s.Browser.NewPage()
+	page, cleanup, err := s.Browser.NewPageWithCookies(project.Cookies)
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
